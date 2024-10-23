@@ -5,27 +5,37 @@
 * Will perform full validation every 10K.
 * Bear in mind that current running validation will probably be an undercount.
 * To speed up full validation could use KV cache.
+* Proceeding with the small (T12) model size described in the paper.
+* We'll keep the position of the layernorm as they are right now (GPT-2 and LLaMA-2 style).
+
 
 # Things we can modify
-* Learning rate
-* Learning rate schedule (Cosine/Adam/IVON)
-* Number of heads
-* Head dimension (Embedding dimension)
-* Number of layers
-* Dropout
-* Activation function (GeLU/ReLU,SoLU, SwiGLU)
-* Layer norm type (RMSNorm/LayerNorm)
-* Initialisation scheme (Random/GPT2/...)
-* Optimiser (Adam/AdamW/Cosine/IVON)
-* Gradient accumulation steps
-* Batch size
-* Residual scaling
-* Biases or not
-* Losses (layerwise etc.)
-* Positional embedding type (Absolute/Relative/AliBi/RoPE)
-* Learning steps
-* Precision
-* Harder
+Model
+- [x] Block size (context size)
+- [x] Number of heads
+- [x] Head dimension (Embedding dimension)
+- [x] Dropout
+- [x] Number of layers
+- [ ] Layer norm type (RMSNorm/LayerNorm)
+- ~~Position of layernorm~~
+- [ ] Biases or not
+- [ ] Residual scaling
+- [ ] Positional embedding type (Absolute/Relative/AliBi/RoPE)
+- [ ] Layerwise positional embedding
+- [ ] Activation function (GeLU/ReLU,SoLU, SwiGLU)
+- [ ] Initialisation scheme (Random/GPT2/...)
+
+Training
+- [x] Learning rate
+- [ ] Learning rate schedule (Cosine/Adam/IVON)
+- [ ] Optimiser (Adam/AdamW/Cosine/IVON)
+- [ ] Gradient accumulation steps
+- [ ] Batch size
+- [ ] Losses (layerwise etc.)
+- [x] Training steps
+- [ ] Precision
+
+Harder
     * Transformer-XL
     * Compressive transformer
     * Sparse transformer
@@ -40,3 +50,4 @@
 * Do we do one character at a time?
 * How many independent characters are there in enwik8? 205
 * What is the token distribution? See byte_distribution.png.
+* What is the difference between GPT and LLaMA?
