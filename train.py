@@ -154,7 +154,7 @@ if os.path.exists(meta_path):
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout, norm_type=norm_type, 
                   mlp=mlp, activation=activation, pos_emb=pos_emb, rope=rope, num_targets=num_targets,
-                  intermediate_loss=intermediate_loss) # start with model_args from command line
+                  intermediate_loss=intermediate_loss, max_iters=max_iters) # start with model_args from command line
 print(model_args)
 if init_from == 'scratch':
     # init a new model from scratch
@@ -306,7 +306,7 @@ while True:
             # looking at the source of that context manager, it just toggles this variable
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
-            logits, loss = model(X, Y)
+            logits, loss = model(X, Y, current_iter=iter_num)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')

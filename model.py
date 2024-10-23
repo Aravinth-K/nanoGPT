@@ -211,6 +211,7 @@ class GPTConfig:
     rope: bool = False
     num_targets: int = 2
     intermediate_loss: bool = False
+    max_iters: int = 600000
 
 class GPT(nn.Module):
 
@@ -292,7 +293,7 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None, eval_only=False):
+    def forward(self, idx, targets=None, eval_only=False, current_iter=None):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -320,25 +321,27 @@ class GPT(nn.Module):
 
             # Compute auxiliary predictions from the current layer
             if self.config.intermediate_loss and targets is not None and not eval_only:
-                shifted_targets = []
-                for k in range(self.config.num_targets):
-                    if k == 0:
-                        shifted_target = targets.contiguous()
-                        aux_logits = self.aux_lm_heads[layer_idx][k](x).contiguous()
-                    else:
-                        # Shift targets for each additional target
-                        shifted_target = targets[:, k:].contiguous()
-                        # Adjust logits to align with shifted targets
-                        aux_logits = self.aux_lm_heads[layer_idx][k](x)[:, :-k, :].contiguous()
-                    shifted_targets.append(shifted_target)
-                    # Compute cross-entropy loss
-                    aux_loss = F.cross_entropy(
-                        aux_logits.view(-1, aux_logits.size(-1)),
-                        shifted_target.view(-1),
-                        ignore_index=-1
-                    )
-                    # Weight intermediate losses less than the main loss
-                    intermediate_losses.append(0.5 * aux_loss)
+                # Calculate the dropout step for this layer
+                dropout_step = (layer_idx + 1) / (2 * self.config.n_layer) * self.config.max_iters
+                if current_iter is not None and current_iter < dropout_step:
+                    for k in range(self.config.num_targets):
+                        if k == 0:
+                            shifted_target = targets.contiguous()
+                            aux_logits = self.aux_lm_heads[layer_idx][k](x).contiguous()
+                        else:
+                            # Shift targets for each additional target
+                            shifted_target = targets[:, k:].contiguous()
+                            # Adjust logits to align with shifted targets
+                            aux_logits = self.aux_lm_heads[layer_idx][k](x)[:, :-k, :].contiguous()
+                        # Compute cross-entropy loss
+                        aux_loss = F.cross_entropy(
+                            aux_logits.view(-1, aux_logits.size(-1)),
+                            shifted_target.view(-1),
+                            ignore_index=-1
+                        )
+                        # Weight intermediate losses less than the main loss
+                        weight = (0.5) ** k
+                        intermediate_losses.append(weight * aux_loss)
 
         x = self.transformer.ln_f(x)
 
@@ -367,7 +370,7 @@ class GPT(nn.Module):
                     ignore_index=-1
                 )
                 # Apply weighting: primary loss has weight 1.0, auxiliary losses have weight 0.5
-                weight = 1.0 if k == 0 else 0.5
+                weight = (0.5) ** k
                 losses.append(weight * loss)
 
             # Sum all losses
