@@ -25,6 +25,20 @@ class LayerNorm(nn.Module):
 
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+    
+class RMSNorm(nn.Module):
+    def __init__(self, ndim, bias=True, eps=1e-5):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(ndim))
+        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+        self.eps = eps
+
+    def forward(self, x):
+        norm = x.pow(2).mean(-1, keepdim=True).sqrt()
+        if self.bias is not None:
+            return self.scale * x / (norm + self.eps) + self.bias
+        else:
+            return self.scale * x / (norm + self.eps)
 
 class CausalSelfAttention(nn.Module):
 
