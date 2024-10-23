@@ -217,13 +217,74 @@ def estimate_loss():
     out = {}
     model.eval()
     for split in ['train', 'val']:
-        losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
-            X, Y = get_batch(split)
-            with ctx:
-                logits, loss = model(X, Y)
-            losses[k] = loss.item()
-        out[split] = losses.mean()
+        if split=='train':
+            losses = torch.zeros(eval_iters)
+            for k in range(eval_iters):
+                X, Y = get_batch(split)
+                with ctx:
+                    logits, loss = model(X, Y)
+                losses[k] = loss.item()
+            out[split] = losses.mean()
+        elif split == 'val':
+            # Sequential validation
+            print("Starting sequential validation...")
+            
+            # Load the validation data
+            data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint8, mode='r')
+            total_length = len(data)
+            
+            # Calculate the number of batches
+            # Shift by 1 to cover all possible sequences
+            # To optimize, we'll process multiple sequences in parallel using batch_size
+            num_sequences = total_length - block_size
+            num_batches = math.ceil(num_sequences / batch_size)
+            
+            # Initialize a tensor to accumulate losses
+            total_loss = 0.0
+            count = 0
+
+            for b in range(num_batches):
+                # Calculate the starting indices for this batch
+                start_idx = b * batch_size
+                end_idx = start_idx + batch_size
+                if end_idx > num_sequences:
+                    end_idx = num_sequences
+                current_batch_size = end_idx - start_idx
+
+                # Prepare input (X) and target (Y) tensors
+                X = torch.stack([
+                    torch.from_numpy(data[i:i+block_size].astype(np.int64))
+                    for i in range(start_idx, end_idx)
+                ])
+                Y = torch.stack([
+                    torch.from_numpy(data[i+1:i+1+block_size].astype(np.int64))
+                    for i in range(start_idx, end_idx)
+                ])
+
+                # Move data to the appropriate device
+                if device_type == 'cuda':
+                    X, Y = X.pin_memory().to(device, non_blocking=True), Y.pin_memory().to(device, non_blocking=True)
+                else:
+                    X, Y = X.to(device), Y.to(device)
+
+                # Forward pass
+                with ctx:
+                    logits, loss = model(X, Y)
+
+                # Accumulate the loss
+                total_loss += loss.item() * current_batch_size
+                count += current_batch_size
+
+                # Optional: Print progress
+                if master_process and b % 1000 == 0:
+                    print(f"Validation progress: {b}/{num_batches} batches processed.")
+
+                print(total_loss/count)
+
+            # Compute the average loss over the entire validation set
+            avg_val_loss = total_loss / count
+            out['val'] = avg_val_loss
+            print(f"Sequential validation completed. Average Val Loss: {avg_val_loss:.4f}")
     model.train()
     return out
 

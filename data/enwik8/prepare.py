@@ -86,7 +86,7 @@ def prepare_enwik8(data_dir='data/enwik8'):
 
     # Save the meta information
     meta = {
-        'vocab_size': vocab_size,
+        'vocab_size': 256,
         'itos': itos,
         'stoi': stoi,
     }
