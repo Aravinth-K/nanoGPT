@@ -16,13 +16,13 @@ Model
 - [x] Head dimension (Embedding dimension)
 - [x] Dropout
 - [x] Number of layers
-- [ ] Layer norm type (RMSNorm/LayerNorm)
+- [x] Layer norm type (RMSNorm/LayerNorm)
 - ~~Position of layernorm~~
-- [ ] Biases or not
+- [x] Biases or not
+- [x] Activation function (GeLU/ReLU/SoLU, SwiGLU)
 - [ ] Residual scaling
 - [ ] Positional embedding type (Absolute/Relative/AliBi/RoPE)
 - [ ] Layerwise positional embedding
-- [ ] Activation function (GeLU/ReLU,SoLU, SwiGLU)
 - [ ] Initialisation scheme (Random/GPT2/...)
 
 Training

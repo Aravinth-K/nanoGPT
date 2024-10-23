@@ -23,6 +23,25 @@ def get_norm(config):
         return RMSNorm(config.n_embd, config.bias)
     else:
         raise ValueError(f"Unsupported norm type: {norm_type}")
+    
+def get_activation(activation_name):
+    activation_name = activation_name.lower()
+    if activation_name == 'relu':
+        return nn.ReLU()
+    elif activation_name == 'silu':
+        return nn.SiLU()
+    elif activation_name == 'selu':
+        return nn.SELU()
+    elif activation_name == 'solu':
+        return SoLU()  # Anthropic
+    if activation_name == 'gelu':
+        return nn.GELU()
+    else:
+        raise ValueError(f"Unsupported activation: {activation_name}")
+    
+class SoLU(nn.Module):
+    def forward(self, x):
+        return x * nn.Softmax()(x)
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -106,13 +125,30 @@ class MLP(nn.Module):
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
+        self.activation = get_activation(config.activation)
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = self.gelu(x)
+        x = self.activation(x)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
+    
+class FeedForward(nn.Module):
+    
+    def __init__(self, config):
+        super().__init__()
+        hidden_dim = 4 * int(2 * config.n_embd / 3)
+        hidden_dim = 256 * ((hidden_dim + 255) // 256)
+        print(f"FeedForward hidden_dim: {hidden_dim}")
+        self.w1 = nn.Linear(config.n_embd, hidden_dim, bias=config.bias)
+        self.w2 = nn.Linear(hidden_dim, config.n_embd, bias=config.bias)
+        self.w3 = nn.Linear(config.n_embd, hidden_dim, bias=config.bias)
+        self.dropout = nn.Dropout(config.dropout)
+        self.activation = get_activation(config.activation)
+
+    def forward(self, x):
+        return self.dropout(self.w2(self.activation(self.w1(x)) * self.w3(x)))
 
 class Block(nn.Module):
 
@@ -121,7 +157,12 @@ class Block(nn.Module):
         self.ln_1 = get_norm(config)
         self.attn = CausalSelfAttention(config)
         self.ln_2 = get_norm(config)
-        self.mlp = MLP(config)
+        if config.mlp == "gpt":
+            self.mlp = MLP(config)
+        elif config.mlp == "llama":
+            self.mlp = FeedForward(config)
+        else:
+            raise ValueError(f"Unsupported MLP type: {config.mlp}")
 
     def forward(self, x):
         x = x + self.attn(self.ln_1(x))
@@ -138,6 +179,8 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     norm_type: str = 'layernorm'
+    mlp: str = 'gpt'
+    activation: str = 'gelu'
 
 class GPT(nn.Module):
 
