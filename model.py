@@ -311,8 +311,8 @@ class GPT(nn.Module):
         else:
             raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
         
-        intermediate_losses = []
-        
+        total_loss = 0
+
         for layer_idx, block in enumerate(self.transformer.h):
             if self.config.pos_emb == 'learned_per_layer':
                 pos_emb_layer = self.transformer.wpe[layer_idx](pos)
@@ -323,6 +323,8 @@ class GPT(nn.Module):
             if self.config.intermediate_loss and targets is not None and not eval_only:
                 # Calculate the dropout step for this layer
                 dropout_step = (layer_idx + 1) / (2 * self.config.n_layer) * self.config.max_iters
+
+                intermediate_losses = []
                 if current_iter is not None and current_iter < dropout_step:
                     for k in range(self.config.num_targets):
                         if k == 0:
@@ -342,6 +344,7 @@ class GPT(nn.Module):
                         # Weight intermediate losses less than the main loss
                         weight = (0.5) ** k
                         intermediate_losses.append(weight * aux_loss)
+                total_loss += sum(intermediate_losses)
 
         x = self.transformer.ln_f(x)
 
@@ -374,10 +377,10 @@ class GPT(nn.Module):
                 losses.append(weight * loss)
 
             # Sum all losses
-            total_loss = sum(losses)
+            total_loss += sum(losses)
         elif targets is not None and eval_only:
             logits = self.lm_heads[0](x)
-            total_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            total_loss += F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim; (b, 1, vocab)

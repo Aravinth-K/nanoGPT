@@ -27,10 +27,9 @@ Model
 Training
 - [x] Learning rate
 - [ ] Optimiser (Adam/AdamW/Cosine/IVON)
-- [ ] Gradient accumulation steps
+- [x] Gradient accumulation steps
 - [x] Batch size
-- [ ] Losses (layerwise etc.)
-- [ ] Multiple predictions
+- [x] Multiple predictions
 - [x] Intermediate losses
 - [x] Training steps
 - [ ] Precision
@@ -53,3 +52,4 @@ Harder
 * What is the difference between GPT and LLaMA? LLaMA uses SwiGLU and RMSNorm and RoPE.
 * Are we currently doing the "multiple position" training? Yes.
 * Do we need multiple prediciton heads for every layer? Maybe.
+* Should we add a bias to the prediction heads?
