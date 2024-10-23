@@ -209,6 +209,7 @@ class GPTConfig:
     activation: str = 'gelu'
     pos_emb: str = 'learned'
     rope: bool = False
+    num_targets: int = 2
 
 class GPT(nn.Module):
 
@@ -235,12 +236,16 @@ class GPT(nn.Module):
         else:
             raise ValueError(f"Unsupported pos_emb: {config.pos_emb}")
         
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        # Define multiple LM heads
+        self.lm_heads = nn.ModuleList([
+            nn.Linear(config.n_embd, config.vocab_size, bias=False) 
+            for _ in range(config.num_targets)
+        ])
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        self.transformer.wte.weight = self.lm_heads[0].weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -276,7 +281,7 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, eval_only=False):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -302,16 +307,45 @@ class GPT(nn.Module):
 
         x = self.transformer.ln_f(x)
 
-        if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+        if targets is not None and not eval_only:
+            # Generate logits for all targets
+            logits = [head(x) for head in self.lm_heads]  # List of tensors: [ (b, t, vocab), ... ]
+
+            # Prepare shifted targets for each head
+            # Head 0 predicts t_i given t_{0:i-1}
+            # Head 1 predicts t_{i+1} given t_{0:i-1}, etc.
+            shifted_targets = []
+            for k in range(self.config.num_targets):
+                if k == 0:
+                    target = targets.contiguous()
+                else:
+                    target = targets[:, k:].contiguous()
+                    logits[k] = logits[k][:, :-k, :].contiguous()
+                shifted_targets.append(target)
+
+            # Compute losses for each head
+            losses = []
+            for k in range(self.config.num_targets):
+                loss = F.cross_entropy(
+                    logits[k].view(-1, logits[k].size(-1)),
+                    shifted_targets[k].view(-1),
+                    ignore_index=-1
+                )
+                # Apply weighting: primary loss has weight 1.0, auxiliary losses have weight 0.5
+                weight = 1.0 if k == 0 else 0.5
+                losses.append(weight * loss)
+
+            # Sum all losses
+            total_loss = sum(losses)
+        elif targets is not None and eval_only:
+            logits = self.lm_heads[0](x)
+            total_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim
-            loss = None
+            logits = self.lm_head(x[:, [-1], :]) # note: using list [-1] to preserve the time dim; (b, 1, vocab)
+            total_loss = None
 
-        return logits, loss
+        return logits, total_loss
 
     def crop_block_size(self, block_size):
         # model surgery to decrease the block size if necessary

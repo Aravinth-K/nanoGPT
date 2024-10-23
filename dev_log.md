@@ -7,7 +7,7 @@
 * To speed up full validation could use KV cache.
 * Proceeding with the small (T12) model size described in the paper.
 * We'll keep the position of the layernorm as they are right now (GPT-2 and LLaMA-2 style).
-
+* One thing I didn't understand in the main paper is that (I think) they predict two tokens ahead using the same context. Therefore we only need to duplicate the head and not do autoregressive prediction.
 
 # Things we can modify
 Model
@@ -30,6 +30,8 @@ Training
 - [ ] Gradient accumulation steps
 - [x] Batch size
 - [ ] Losses (layerwise etc.)
+- [ ] Multiple predictions
+- [x] Intermediate losses
 - [x] Training steps
 - [ ] Precision
 
@@ -50,3 +52,4 @@ Harder
 * What is the token distribution? See byte_distribution.png.
 * What is the difference between GPT and LLaMA? LLaMA uses SwiGLU and RMSNorm and RoPE.
 * Are we currently doing the "multiple position" training? Yes.
+* Do we need multiple prediciton heads for every layer? Maybe.

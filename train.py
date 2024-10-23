@@ -57,6 +57,7 @@ mlp = 'gpt'
 activation = 'gelu'
 pos_emb = 'learned'
 rope = False
+num_targets = 1
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
@@ -151,7 +152,7 @@ if os.path.exists(meta_path):
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout, norm_type=norm_type, 
-                  mlp=mlp, activation=activation, pos_emb=pos_emb, rope=rope) # start with model_args from command line
+                  mlp=mlp, activation=activation, pos_emb=pos_emb, rope=rope, num_targets=num_targets) # start with model_args from command line
 print(model_args)
 if init_from == 'scratch':
     # init a new model from scratch
@@ -228,7 +229,7 @@ def estimate_loss():
         for k in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
-                logits, loss = model(X, Y)
+                logits, loss = model(X, Y, eval_only=True)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
