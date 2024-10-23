@@ -238,10 +238,14 @@ class GPT(nn.Module):
             raise ValueError(f"Unsupported pos_emb: {config.pos_emb}")
         
         if config.intermediate_loss:
+            # Create a separate auxiliary head for each target per layer
             self.aux_lm_heads = nn.ModuleList([
-                nn.Linear(config.n_embd, config.vocab_size, bias=False)
-            for _ in range(config.n_layer)  # One head per layer
-        ])
+                nn.ModuleList([
+                    nn.Linear(config.n_embd, config.vocab_size, bias=False)
+                    for _ in range(config.num_targets)
+                ]) 
+                for _ in range(config.n_layer)
+            ])
         
         # Define multiple LM heads
         self.lm_heads = nn.ModuleList([
@@ -316,14 +320,25 @@ class GPT(nn.Module):
 
             # Compute auxiliary predictions from the current layer
             if self.config.intermediate_loss and targets is not None and not eval_only:
-                aux_logits = self.aux_lm_heads[layer_idx](x)
-                aux_loss = F.cross_entropy(
-                    aux_logits.view(-1, aux_logits.size(-1)),
-                    targets.view(-1),
-                    ignore_index=-1
-                )
-                # Weight intermediate losses less than the main loss
-                intermediate_losses.append(0.5 * aux_loss)
+                shifted_targets = []
+                for k in range(self.config.num_targets):
+                    if k == 0:
+                        shifted_target = targets.contiguous()
+                        aux_logits = self.aux_lm_heads[layer_idx][k](x).contiguous()
+                    else:
+                        # Shift targets for each additional target
+                        shifted_target = targets[:, k:].contiguous()
+                        # Adjust logits to align with shifted targets
+                        aux_logits = self.aux_lm_heads[layer_idx][k](x)[:, :-k, :].contiguous()
+                    shifted_targets.append(shifted_target)
+                    # Compute cross-entropy loss
+                    aux_loss = F.cross_entropy(
+                        aux_logits.view(-1, aux_logits.size(-1)),
+                        shifted_target.view(-1),
+                        ignore_index=-1
+                    )
+                    # Weight intermediate losses less than the main loss
+                    intermediate_losses.append(0.5 * aux_loss)
 
         x = self.transformer.ln_f(x)
 
