@@ -16,16 +16,17 @@ wandb_run_name = 'mini-gpt'
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
 batch_size = 16
-block_size = 512 # context of up to 256 previous characters
+block_size = 32 # context of up to 256 previous characters
 
 # baby GPT model :)
 n_layer = 12
 n_head = 2
 n_embd = 512
 dropout = 0.2
-norm_type = 'rmsnorm'
-mlp = 'llama'
-activation = 'silu'
+norm_type = 'layernorm'
+mlp = 'gpt'
+activation = 'gelu'
+pos_emb = 'learned_per_layer'
 
 learning_rate = 1e-3 # with baby networks can afford to go a bit higher
 max_iters = 5000

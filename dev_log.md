@@ -21,16 +21,14 @@ Model
 - [x] Biases or not
 - [x] Activation function (GeLU/ReLU/SoLU, SwiGLU)
 - [ ] Residual scaling
-- [ ] Positional embedding type (Absolute/Relative/AliBi/RoPE)
-- [ ] Layerwise positional embedding
+- [x] Positional embedding type (singel learned/learned per layer/RoPE)
 - [ ] Initialisation scheme (Random/GPT2/...)
 
 Training
 - [x] Learning rate
-- [ ] Learning rate schedule (Cosine/Adam/IVON)
 - [ ] Optimiser (Adam/AdamW/Cosine/IVON)
 - [ ] Gradient accumulation steps
-- [ ] Batch size
+- [x] Batch size
 - [ ] Losses (layerwise etc.)
 - [x] Training steps
 - [ ] Precision
@@ -50,4 +48,5 @@ Harder
 * Do we do one character at a time?
 * How many independent characters are there in enwik8? 205
 * What is the token distribution? See byte_distribution.png.
-* What is the difference between GPT and LLaMA?
+* What is the difference between GPT and LLaMA? LLaMA uses SwiGLU and RMSNorm and RoPE.
+* Are we currently doing the "multiple position" training? Yes.

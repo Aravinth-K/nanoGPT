@@ -55,6 +55,7 @@ n_embd = 768
 norm_type = 'layernorm'
 mlp = 'gpt'
 activation = 'gelu'
+pos_emb = 'learned'
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
@@ -149,7 +150,7 @@ if os.path.exists(meta_path):
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout, norm_type=norm_type, 
-                  mlp=mlp, activation=activation) # start with model_args from command line
+                  mlp=mlp, activation=activation, pos_emb=pos_emb) # start with model_args from command line
 print(model_args)
 if init_from == 'scratch':
     # init a new model from scratch
@@ -258,7 +259,6 @@ local_iter_num = 0 # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model # unwrap DDP container if needed
 running_mfu = -1.0
 while True:
-
     # determine and set the learning rate for this iteration
     lr = get_lr(iter_num) if decay_lr else learning_rate
     for param_group in optimizer.param_groups:

@@ -33,7 +33,7 @@ def get_activation(activation_name):
     elif activation_name == 'selu':
         return nn.SELU()
     elif activation_name == 'solu':
-        return SoLU()  # Anthropic
+        return SoLU()  # Anthropic (primarily for interpretability)
     if activation_name == 'gelu':
         return nn.GELU()
     else:
@@ -83,6 +83,7 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+        self.pos_emb = config.pos_emb
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
@@ -90,8 +91,10 @@ class CausalSelfAttention(nn.Module):
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
+        if config.pos_emb == 'rope':
+            self.rotary_emb = RoPE(config.n_embd // config.n_head, config.block_size)
 
-    def forward(self, x):
+    def forward(self, x, pos=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -99,6 +102,9 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+
+        if self.pos_emb == 'rope' and pos is not None:
+            q, k = self.rotary_emb.apply_rotary_pos_emb(q, k, pos)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -164,10 +170,29 @@ class Block(nn.Module):
         else:
             raise ValueError(f"Unsupported MLP type: {config.mlp}")
 
-    def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
+    def forward(self, x, pos=None):
+        x = x + self.attn(self.ln_1(x), pos)
         x = x + self.mlp(self.ln_2(x))
         return x
+    
+class RoPE:
+    def __init__(self, dim):
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
+        self.register_buffer('inv_freq', inv_freq)
+
+    def apply_rotary_pos_emb(self, q, k, pos):
+        sinusoid_inp = torch.einsum("i , j -> i j", pos, self.inv_freq)
+        sin = sinusoid_inp.sin()
+        cos = sinusoid_inp.cos()
+        q_rot = (q * cos) + (self.rotate_half(q) * sin)
+        k_rot = (k * cos) + (self.rotate_half(k) * sin)
+        return q_rot, k_rot
+
+    @staticmethod
+    def rotate_half(x):
+        x = x.view(*x.shape[:-1], -1, 2)
+        x = torch.stack([-x[..., 1], x[..., 0]], dim=-1)
+        return x.flatten(-2)
 
 @dataclass
 class GPTConfig:
@@ -181,6 +206,7 @@ class GPTConfig:
     norm_type: str = 'layernorm'
     mlp: str = 'gpt'
     activation: str = 'gelu'
+    pos_emb: str = 'learned'
 
 class GPT(nn.Module):
 
@@ -192,11 +218,23 @@ class GPT(nn.Module):
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = get_norm(config),
         ))
+
+        # Positional Embeddings
+        if config.pos_emb == 'learned':
+            self.transformer.wpe = nn.Embedding(config.block_size, config.n_embd)
+        elif config.pos_emb == 'learned_per_layer':
+            self.transformer.wpe = nn.ModuleList([
+                nn.Embedding(config.block_size, config.n_embd) for _ in range(config.n_layer)
+            ])
+        elif config.pos_emb == 'rope':
+            self.transformer.rope = RoPE(config.n_embd // config.n_head)
+        else:
+            raise ValueError(f"Unsupported pos_emb: {config.pos_emb}")
+        
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -223,7 +261,11 @@ class GPT(nn.Module):
         """
         n_params = sum(p.numel() for p in self.parameters())
         if non_embedding:
-            n_params -= self.transformer.wpe.weight.numel()
+            if self.config.pos_emb == 'learned_per_layer':
+                for i in range(self.config.n_layer):
+                    n_params -= self.transformer.wpe[i].weight.numel()
+            else:
+                n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
     def _init_weights(self, module):
@@ -242,10 +284,24 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
-        for block in self.transformer.h:
-            x = block(x)
+
+        # Positional embeddings
+        if self.config.pos_emb == 'learned':
+            pos_emb = self.transformer.wpe(pos)  # (t, n_embd)
+            x = self.transformer.drop(tok_emb + pos_emb)
+        elif self.config.pos_emb == 'learned_per_layer':
+            x = self.transformer.drop(tok_emb)
+        elif self.config.pos_emb == 'rope':
+            x = self.transformer.drop(tok_emb)
+        else:
+            raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
+        
+        for layer_idx, block in enumerate(self.transformer.h):
+            if self.config.pos_emb == 'learned_per_layer':
+                pos_emb_layer = self.transformer.wpe[layer_idx](pos)
+                x = x + pos_emb_layer
+            x = block(x, pos if self.config.pos_emb == 'rope' else None)
+
         x = self.transformer.ln_f(x)
 
         if targets is not None:
