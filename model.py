@@ -83,7 +83,7 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
-        self.pos_emb = config.pos_emb
+        self.rope = config.rope
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
@@ -91,8 +91,8 @@ class CausalSelfAttention(nn.Module):
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
-        if config.pos_emb == 'rope':
-            self.rotary_emb = RoPE(config.n_embd // config.n_head, config.block_size)
+        if self.rope:
+            self.rotary_emb = RoPE(config.n_head)
 
     def forward(self, x, pos=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -103,7 +103,7 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
-        if self.pos_emb == 'rope' and pos is not None:
+        if self.rope and pos is not None:
             q, k = self.rotary_emb.apply_rotary_pos_emb(q, k, pos)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
@@ -175,8 +175,9 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
     
-class RoPE:
+class RoPE(nn.Module):
     def __init__(self, dim):
+        super().__init__()
         inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer('inv_freq', inv_freq)
 
@@ -207,6 +208,7 @@ class GPTConfig:
     mlp: str = 'gpt'
     activation: str = 'gelu'
     pos_emb: str = 'learned'
+    rope: bool = False
 
 class GPT(nn.Module):
 
@@ -230,8 +232,6 @@ class GPT(nn.Module):
             self.transformer.wpe = nn.ModuleList([
                 nn.Embedding(config.block_size, config.n_embd) for _ in range(config.n_layer)
             ])
-        elif config.pos_emb == 'rope':
-            self.transformer.rope = RoPE(config.n_embd // config.n_head)
         else:
             raise ValueError(f"Unsupported pos_emb: {config.pos_emb}")
         
@@ -291,8 +291,6 @@ class GPT(nn.Module):
             x = self.transformer.drop(tok_emb + pos_emb)
         elif self.config.pos_emb == 'learned_per_layer':
             x = self.transformer.drop(tok_emb)
-        elif self.config.pos_emb == 'rope':
-            x = self.transformer.drop(tok_emb)
         else:
             raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
         
@@ -300,7 +298,7 @@ class GPT(nn.Module):
             if self.config.pos_emb == 'learned_per_layer':
                 pos_emb_layer = self.transformer.wpe[layer_idx](pos)
                 x = x + pos_emb_layer
-            x = block(x, pos if self.config.pos_emb == 'rope' else None)
+            x = block(x, pos if self.config.rope else None)
 
         x = self.transformer.ln_f(x)
 
