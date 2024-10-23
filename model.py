@@ -210,6 +210,7 @@ class GPTConfig:
     pos_emb: str = 'learned'
     rope: bool = False
     num_targets: int = 2
+    intermediate_loss: bool = False
 
 class GPT(nn.Module):
 
@@ -235,6 +236,12 @@ class GPT(nn.Module):
             ])
         else:
             raise ValueError(f"Unsupported pos_emb: {config.pos_emb}")
+        
+        if config.intermediate_loss:
+            self.aux_lm_heads = nn.ModuleList([
+                nn.Linear(config.n_embd, config.vocab_size, bias=False)
+            for _ in range(config.n_layer)  # One head per layer
+        ])
         
         # Define multiple LM heads
         self.lm_heads = nn.ModuleList([
@@ -299,11 +306,24 @@ class GPT(nn.Module):
         else:
             raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
         
+        intermediate_losses = []
+        
         for layer_idx, block in enumerate(self.transformer.h):
             if self.config.pos_emb == 'learned_per_layer':
                 pos_emb_layer = self.transformer.wpe[layer_idx](pos)
                 x = x + pos_emb_layer
             x = block(x, pos if self.config.rope else None)
+
+            # Compute auxiliary predictions from the current layer
+            if self.config.intermediate_loss and targets is not None and not eval_only:
+                aux_logits = self.aux_lm_heads[layer_idx](x)
+                aux_loss = F.cross_entropy(
+                    aux_logits.view(-1, aux_logits.size(-1)),
+                    targets.view(-1),
+                    ignore_index=-1
+                )
+                # Weight intermediate losses less than the main loss
+                intermediate_losses.append(0.5 * aux_loss)
 
         x = self.transformer.ln_f(x)
 
