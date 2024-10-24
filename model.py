@@ -418,7 +418,7 @@ class GPT(nn.Module):
             logits = lm_logits[:, :, 0, :]  # Shape: (b, t, vocab_size)
 
             # Flatten logits and targets for cross_entropy
-            lm_logits_flat = logits.view(-1, self.config.vocab_size)  # Shape: (b * t, vocab_size)
+            lm_logits_flat = logits.view(-1, logits.size(-1))  # Shape: (b * t, vocab_size)
             targets_flat = targets.view(-1)  # Shape: (b * t)
 
             # Compute cross-entropy loss with ignore_index=-1
