@@ -242,7 +242,7 @@ class GPT(nn.Module):
             # Create a separate auxiliary head for each target per layer
             self.aux_lm_heads = nn.ModuleList([
                 nn.ModuleList([
-                    nn.Linear(config.n_embd, config.vocab_size, bias=False)
+                    nn.Linear(config.n_embd, config.vocab_size, bias=config.bias)
                     for _ in range(config.num_targets)
                 ]) 
                 for _ in range(config.n_layer)
@@ -250,7 +250,7 @@ class GPT(nn.Module):
         
         # Define multiple LM heads
         self.lm_heads = nn.ModuleList([
-            nn.Linear(config.n_embd, config.vocab_size, bias=False) 
+            nn.Linear(config.n_embd, config.vocab_size, bias=config.bias) 
             for _ in range(config.num_targets)
         ])
         # with weight tying when using torch.compile() some warnings get generated:
