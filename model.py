@@ -241,23 +241,25 @@ class GPT(nn.Module):
         if config.intermediate_loss:
             # Create a separate auxiliary head for each target per layer
             self.aux_lm_heads = nn.ModuleList([
-                nn.ModuleList([
-                    nn.Linear(config.n_embd, config.vocab_size, bias=config.bias)
-                    for _ in range(config.num_targets)
-                ]) 
-                for _ in range(config.n_layer)
+                nn.Linear(
+                    config.n_embd, 
+                    config.num_targets * config.vocab_size, 
+                    bias=config.bias
+                ) for _ in range(config.n_layer)
             ])
         
         # Define multiple LM heads
-        self.lm_heads = nn.ModuleList([
-            nn.Linear(config.n_embd, config.vocab_size, bias=config.bias) 
-            for _ in range(config.num_targets)
-        ])
+        self.lm_heads = nn.Linear(
+            config.n_embd, 
+            config.num_targets * config.vocab_size, 
+            bias=config.bias
+        )
+
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_heads[0].weight # https://paperswithcode.com/method/weight-tying
+        # self.transformer.wte.weight = self.lm_heads[0].weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -324,66 +326,119 @@ class GPT(nn.Module):
                 # Calculate the dropout step for this layer
                 dropout_step = (layer_idx + 1) / (2 * self.config.n_layer) * self.config.max_iters
 
-                intermediate_losses = []
                 if current_iter is not None and current_iter < dropout_step:
-                    for k in range(self.config.num_targets):
-                        if k == 0:
-                            shifted_target = targets.contiguous()
-                            aux_logits = self.aux_lm_heads[layer_idx][k](x).contiguous()
-                        else:
-                            # Shift targets for each additional target
-                            shifted_target = targets[:, k:].contiguous()
-                            # Adjust logits to align with shifted targets
-                            aux_logits = self.aux_lm_heads[layer_idx][k](x)[:, :-k, :].contiguous()
-                        # Compute cross-entropy loss
-                        aux_loss = F.cross_entropy(
-                            aux_logits.view(-1, aux_logits.size(-1)),
-                            shifted_target.view(-1),
-                            ignore_index=-1
-                        )
-                        # Weight intermediate losses less than the main loss
-                        weight = (0.5) ** k
-                        intermediate_losses.append(weight * aux_loss)
-                total_loss += sum(intermediate_losses)
+                    # Vectorized auxiliary logits computation
+                    aux_logits = self.aux_lm_heads[layer_idx](x)  # Shape: (b, t, num_targets * vocab_size)
+                    aux_logits = aux_logits.view(b, t, self.config.num_targets, self.config.vocab_size)  # Shape: (b, t, num_targets, vocab_size)
+
+                    # Vectorized shifted targets creation using padding and unfolding
+                    padded_targets = F.pad(targets, (0, self.config.num_targets - 1), value=-1)  # Shape: (b, t + num_targets - 1)
+                    shifted_targets = padded_targets.unfold(1, t, 1).permute(0, 2, 1)  # Shape: (b, t, num_targets)
+
+                    # Flatten logits and targets for cross_entropy
+                    aux_logits_flat = aux_logits.permute(0, 2, 1, 3).reshape(-1, self.config.vocab_size)  # Shape: (b * num_targets * t, vocab_size)
+                    shifted_targets_flat = shifted_targets.reshape(-1)  # Shape: (b * num_targets * t)
+
+                    # Compute cross-entropy loss with ignore_index=-1
+                    aux_loss = F.cross_entropy(
+                        aux_logits_flat, 
+                        shifted_targets_flat, 
+                        ignore_index=-1, 
+                        reduction='none'
+                    ).view(b, self.config.num_targets, t)  # Shape: (b, num_targets, t)
+
+                    # Create a mask to ignore the padded positions
+                    mask = shifted_targets != -1  # Shape: (b, t, num_targets)
+                    mask = mask.permute(0, 2, 1)  # Shape: (b, num_targets, t)
+
+                    # Apply mask to the loss
+                    aux_loss = aux_loss * mask.float()  # Zero out the loss where targets were padded
+
+                    # Compute mean loss per target, avoiding division by zero
+                    aux_loss = aux_loss.sum(dim=2) / mask.sum(dim=2).clamp(min=1)  # Shape: (b, num_targets)
+
+                    # Apply weighting: weights = 0.5^k for each target k
+                    weights = 0.5 ** torch.arange(self.config.num_targets, device=device).float()  # Shape: (num_targets,)
+                    weighted_aux_loss = (aux_loss * weights).mean()  # Scalar
+
+                    # Accumulate the total loss
+                    total_loss += weighted_aux_loss
 
         x = self.transformer.ln_f(x)
 
         if targets is not None and not eval_only:
-            # Generate logits for all targets
-            logits = [head(x) for head in self.lm_heads]  # List of tensors: [ (b, t, vocab), ... ]
+            # Compute all main logits at once
+            lm_logits = self.lm_heads(x)  # Shape: (b, t, num_targets * vocab_size)
+            lm_logits = lm_logits.view(b, t, self.config.num_targets, self.config.vocab_size)  # Shape: (b, t, num_targets, vocab_size)
+            logits = lm_logits[:, :, 0, :]  # Shape: (b, t, vocab_size)
 
-            # Prepare shifted targets for each head
-            # Head 0 predicts t_i given t_{0:i-1}
-            # Head 1 predicts t_{i+1} given t_{0:i-1}, etc.
-            shifted_targets = []
-            for k in range(self.config.num_targets):
-                if k == 0:
-                    target = targets.contiguous()
-                else:
-                    target = targets[:, k:].contiguous()
-                    logits[k] = logits[k][:, :-k, :].contiguous()
-                shifted_targets.append(target)
+            # Vectorized shifted targets creation using padding and unfolding
+            # Pad the targets on the right with (num_targets - 1) elements set to -1 (ignore_index)
+            padded_targets = F.pad(targets, (0, self.config.num_targets - 1), value=-1)  # Shape: (b, t + num_targets - 1)
 
-            # Compute losses for each head
-            losses = []
-            for k in range(self.config.num_targets):
-                loss = F.cross_entropy(
-                    logits[k].view(-1, logits[k].size(-1)),
-                    shifted_targets[k].view(-1),
-                    ignore_index=-1
-                )
-                # Apply weighting: primary loss has weight 1.0, auxiliary losses have weight 0.5
-                weight = (0.5) ** k
-                losses.append(weight * loss)
+            # Use unfold to create all shifted versions of targets in a single operation
+            # Each shift corresponds to a different target
+            shifted_targets = padded_targets.unfold(dimension=1, size=t, step=1)  # Shape: (b, num_shifts, t)
+            shifted_targets = shifted_targets.permute(0, 2, 1)  # Shape: (b, t, num_targets)
 
-            # Sum all losses
-            total_loss += sum(losses)
+            # Flatten logits and targets for cross_entropy
+            lm_logits_flat = lm_logits.permute(0, 2, 1, 3).reshape(-1, self.config.vocab_size)  # Shape: (b * num_targets * t, vocab_size)
+            shifted_targets_flat = shifted_targets.reshape(-1)  # Shape: (b * num_targets * t)
+
+            # Compute cross-entropy loss with ignore_index=-1
+            lm_loss = F.cross_entropy(
+                lm_logits_flat, 
+                shifted_targets_flat, 
+                ignore_index=-1, 
+                reduction='none'
+            ).view(b, self.config.num_targets, t)  # Shape: (b, num_targets, t)
+
+            # Create a mask to ignore the padded positions
+            mask = shifted_targets != -1  # Shape: (b, t, num_targets)
+            mask = mask.permute(0, 2, 1)  # Shape: (b, num_targets, t)
+
+            # Apply mask to the loss
+            lm_loss = lm_loss * mask.float()  # Zero out the loss where targets were padded
+
+            # Compute mean loss per target, avoiding division by zero
+            lm_loss = lm_loss.sum(dim=2) / mask.sum(dim=2).clamp(min=1)  # Shape: (b, num_targets)
+
+            # Apply weighting: weights = 0.5^k for each target k
+            weights = 0.5 ** torch.arange(self.config.num_targets, device=device).float()  # Shape: (num_targets,)
+            weighted_lm_loss = (lm_loss * weights).mean()  # Scalar
+
+            # Accumulate the total loss
+            total_loss += weighted_lm_loss
         elif targets is not None and eval_only:
-            logits = self.lm_heads[0](x)
-            total_loss += F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            # Compute all main logits
+            lm_logits = self.lm_heads(x)  # Shape: (b, t, num_targets * vocab_size)
+            lm_logits = lm_logits.view(b, t, self.config.num_targets, self.config.vocab_size)  # Shape: (b, t, num_targets, vocab_size)
+
+            # Select logits for the first target
+            logits = lm_logits[:, :, 0, :]  # Shape: (b, t, vocab_size)
+
+            # Flatten logits and targets for cross_entropy
+            lm_logits_flat = logits.view(-1, self.config.vocab_size)  # Shape: (b * t, vocab_size)
+            targets_flat = targets.view(-1)  # Shape: (b * t)
+
+            # Compute cross-entropy loss with ignore_index=-1
+            lm_loss = F.cross_entropy(
+                lm_logits_flat, 
+                targets_flat, 
+                ignore_index=-1, 
+                reduction='mean'
+            )  # Scalar
+
+            # Accumulate the total loss
+            total_loss += lm_loss
         else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_heads[0](x[:, [-1], :]) # note: using list [-1] to preserve the time dim; (b, 1, vocab)
+            # Inference-time mini-optimization: only forward the lm_head on the very last position
+            x_last = x[:, [-1], :]  # Shape: (b, 1, n_embd)
+            lm_logits_last = self.lm_heads(x_last)  # Shape: (b, 1, num_targets * vocab_size)
+            lm_logits_last = lm_logits_last.view(b, 1, self.config.num_targets, self.config.vocab_size)  # Shape: (b, 1, num_targets, vocab_size)
+
+            # Select logits for the first target
+            logits = lm_logits_last[:, :, 0, :]  # Shape: (b, 1, vocab_size)
             total_loss = None
 
         return logits, total_loss

@@ -28,15 +28,16 @@ mlp = 'gpt'
 activation = 'gelu'
 pos_emb = 'learned_per_layer'
 rope = False
+
 num_targets = 2
 intermediate_loss = True
 learning_rate = 3e-3 # with baby networks can afford to go a bit higher
-max_iters = 1000
-lr_decay_iters = 1000 # make equal to max_iters usually
+max_iters = 10
+lr_decay_iters = 10 # make equal to max_iters usually
 min_lr = 3e-4 # learning_rate / 10 usually
 beta2 = 0.99 # make a bit bigger because number of tokens per iter is small
 
-warmup_iters = 100 # not super necessary potentially
+warmup_iters = 1 # not super necessary potentially
 
 # on macbook also add
 device = 'cpu'  # run on cpu only
