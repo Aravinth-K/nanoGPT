@@ -8,6 +8,24 @@
 * Proceeding with the small (T12) model size described in the paper.
 * We'll keep the position of the layernorm as they are right now (GPT-2 and LLaMA-2 style).
 * One thing I didn't understand in the main paper is that (I think) they predict two tokens ahead using the same context. Therefore we only need to duplicate the head and not do autoregressive prediction.
+* Everything currently functioning. Managed to do a training run on a Colab A100 GPU in 10 minutes on 5000 steps that got an estimated validation loss of 1.25.
+* Plan now is to fix the number of training steps to 10K.
+* To do list is now
+    * Fix batching of predictions for multiple targets/intermediate losses to speed up processing.
+    * Fix wandb logging.
+    * Run a 10K step training run. This will serve as the baseline.
+    * Create a true evaluation script.
+    * One by one go through things we can modify and modify them with all else held fixed.
+* Add tests.
+* This is quite boring right now. The main things that we would tune would be:
+    * Block size.
+    * Number of heads.
+    * Head dimension.
+    * Layer norm type.
+    * Positional embedding type.
+    * Biases.
+    * Activation function.
+    * Optimiser.
 
 # Things we can modify
 Model

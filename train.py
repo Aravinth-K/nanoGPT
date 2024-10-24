@@ -232,6 +232,8 @@ def estimate_loss():
             X, Y = get_batch(split)
             with ctx:
                 logits, loss = model(X, Y, eval_only=True)
+                # Convert BPC loss from nats to bits.
+                loss = loss / math.log(2)
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -307,6 +309,8 @@ while True:
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
             logits, loss = model(X, Y, current_iter=iter_num)
+            # Convert BPC loss from nats to bits.
+            loss = loss / math.log(2)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
