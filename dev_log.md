@@ -13,10 +13,13 @@
 * To do list is now
     * Fix batching of predictions for multiple targets/intermediate losses to speed up processing.
     * Fix wandb logging.
-    * Run a 10K step training run. This will serve as the baseline.
+    * Ensure all checkpoints are saved with appropriate names.
+    * Run a 100K step training run. This will serve as the baseline.
+    * Make firm decision on use of biases in prediction heads.
     * Create a true evaluation script.
     * One by one go through things we can modify and modify them with all else held fixed.
 * Add tests.
+* Acknowledge that this is different from Vaswani in that the layernorm is not at the end.
 * This is quite boring right now. The main things that we would tune would be:
     * Block size.
     * Number of heads.
@@ -26,6 +29,7 @@
     * Biases.
     * Activation function.
     * Optimiser.
+* It would be much more interesting to try the discrete diffusion model.
 
 # Things we can modify
 Model
@@ -71,3 +75,5 @@ Harder
 * Are we currently doing the "multiple position" training? Yes.
 * Do we need multiple prediciton heads for every layer? Maybe.
 * Should we add a bias to the prediction heads?
+* What is the effect of scaling the loss by 1/ln(2)?
+* What is the actual performance of the model that is reported? Is it the loss averaging over predictions at all positions or just the last position?
