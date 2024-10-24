@@ -405,7 +405,7 @@ class GPT(nn.Module):
 
             # Apply weighting: weights = 0.5^k for each target k
             weights = 0.5 ** torch.arange(self.config.num_targets, device=device).float()  # Shape: (num_targets,)
-            weighted_lm_loss = (lm_loss * weights).mean()  # Scalar
+            weighted_lm_loss = (lm_loss * weights).mean(dim=0).sum()  # Scalar
 
             # Accumulate the total loss
             total_loss += weighted_lm_loss
