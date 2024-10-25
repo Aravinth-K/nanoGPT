@@ -311,7 +311,7 @@ while True:
         with ctx:
             logits, loss = model(X, Y, current_iter=iter_num)
             # Convert BPC loss from nats to bits.
-            loss = loss / math.log(2)
+            # loss = loss / math.log(2)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
@@ -346,6 +346,7 @@ while True:
     if iter_num > max_iters:
         break
 
+model.eval()
 
 # Evaluate on the entire validation set
 val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint8, mode='r')
