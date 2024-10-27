@@ -30,6 +30,9 @@
     * Activation function.
     * Optimiser.
 * It would be much more interesting to try the discrete diffusion model.
+* Currently best performance on 50K steps is ~1.5. Quite high!
+* According to Rae et. al. "... reducing the frequency of optimisation updates during training. We find this allows for the best of both worlds — fast initial learning with frequent updates, and better generalisation near the end of training with less frequent updates (e.g. every 4 steps). Reducing the optimisation frequency increases the effective batch size..." 
+* Not so interested in adding a memory mechanism. I like how the transformers method of Al-Rfou et. al. didn't incorporate one and it worked well.
 
 # Things we can modify
 Model
@@ -67,7 +70,7 @@ Harder
     * Pyramid structure
 
 # Questions
-* What is avg. length of a wiki article?
+* What is avg. length of a wiki article? 8192 bytes according to BP-paper
 * Do we do one character at a time?
 * How many independent characters are there in enwik8? 205
 * What is the token distribution? See byte_distribution.png.

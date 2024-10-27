@@ -2,7 +2,7 @@
 # good for debugging and playing on macbooks and such
 
 out_dir = 'out-ewik8-char'
-eval_interval = 250 # keep frequent because we'll overfit
+eval_interval = 50 # keep frequent because we'll overfit
 eval_iters = 200
 log_interval = 10 # don't print too too often
 
@@ -25,9 +25,10 @@ n_embd = 512
 dropout = 0.2
 norm_type = 'layernorm'
 mlp = 'gpt'
-activation = 'gelu'
+activation = 'relu'
 pos_emb = 'learned_per_layer'
 rope = False
+
 num_targets = 2
 intermediate_loss = True
 learning_rate = 3e-3 # with baby networks can afford to go a bit higher
