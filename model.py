@@ -194,6 +194,25 @@ class RoPE(nn.Module):
         x = x.view(*x.shape[:-1], -1, 2)
         x = torch.stack([-x[..., 1], x[..., 0]], dim=-1)
         return x.flatten(-2)
+    
+class PositionalEmbedding(nn.Module):
+    def __init__(self, n_embd, max_seq_len=512):
+        super(PositionalEmbedding, self).__init__()
+
+        self.n_embd = n_embd
+        self.max_seq_len = max_seq_len
+
+        inv_freq = 1 / (10000 ** (torch.arange(0.0, n_embd, 2.0) / n_embd))
+        self.register_buffer('inv_freq', inv_freq)
+
+    def forward(self, pos_seq):
+        # pos_seq: [t]
+        # Ensure pos_seq is float for torch.outer
+        pos_seq = pos_seq.float()
+        sinusoid_inp = torch.outer(pos_seq, self.inv_freq)  # [t, n_embd/2]
+        pos_emb = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim=-1)  # [t, n_embd]
+        pos_emb = pos_emb.unsqueeze(0)  # [1, t, n_embd]
+        return pos_emb
 
 @dataclass
 class GPTConfig:
@@ -212,6 +231,7 @@ class GPTConfig:
     num_targets: int = 2
     intermediate_loss: bool = False
     max_iters: int = 600000
+    weight_tying: bool = True
 
 class GPT(nn.Module):
 
@@ -229,7 +249,9 @@ class GPT(nn.Module):
         ))
 
         # Positional Embeddings
-        if config.pos_emb == 'learned':
+        if config.pos_emb == 'absolute':
+            self.transformer.wpe = PositionalEmbedding(config.n_embd)
+        elif config.pos_emb == 'learned':
             self.transformer.wpe = nn.Embedding(config.block_size, config.n_embd)
         elif config.pos_emb == 'learned_per_layer':
             self.transformer.wpe = nn.ModuleList([
@@ -257,7 +279,8 @@ class GPT(nn.Module):
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        # self.transformer.wte.weight = self.lm_heads[0].weight # https://paperswithcode.com/method/weight-tying
+        if config.weight_tying:
+            self.transformer.wte.weight = self.lm_heads[0].weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -292,6 +315,7 @@ class GPT(nn.Module):
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        
 
     def forward(self, idx, targets=None, eval_only=False, current_iter=None):
         device = idx.device
