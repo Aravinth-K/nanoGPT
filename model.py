@@ -340,7 +340,7 @@ class GPT(nn.Module):
         for layer_idx, block in enumerate(self.transformer.h):
             if self.config.pos_emb == 'learned_per_layer':
                 pos_emb_layer = self.transformer.wpe[layer_idx](pos)
-                x = x + pos_emb_layer
+                x = self.transformer.drop(x + pos_emb_layer)
             x = block(x, pos if self.config.rope else None)
 
             # Compute auxiliary predictions from the current layer
