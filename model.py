@@ -315,7 +315,61 @@ class GPT(nn.Module):
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-        
+
+    def _intermediate_loss(self, x, targets, layer_idx, current_iter):
+        # Calculate the dropout step for this layer
+        dropout_step = (layer_idx + 1) / (2 * self.config.n_layer) * self.config.max_iters
+
+        intermediate_losses = []
+        if current_iter is not None and current_iter < dropout_step:
+            for k in range(self.config.num_targets):
+                if k == 0:
+                    shifted_target = targets.contiguous()
+                    aux_logits = self.aux_lm_heads[layer_idx][k](x).contiguous()
+                else:
+                    # Shift targets for each additional target
+                    shifted_target = targets[:, k:].contiguous()
+                    # Adjust logits to align with shifted targets
+                    aux_logits = self.aux_lm_heads[layer_idx][k](x)[:, :-k, :].contiguous()
+                # Compute cross-entropy loss
+                aux_loss = F.cross_entropy(
+                    aux_logits.view(-1, aux_logits.size(-1)),
+                    shifted_target.view(-1),
+                    ignore_index=-1
+                )
+                # Weight intermediate losses less than the main loss
+                weight = (0.5) ** k
+                intermediate_losses.append(weight * aux_loss)
+        return sum(intermediate_losses)
+    
+    def _output_loss(self, x, targets):
+        # Generate logits for all targets
+        logits = [head(x) for head in self.lm_heads]  # List of tensors: [ (b, t, vocab), ... ]
+
+        # Prepare shifted targets for each head
+        # Head 0 predicts t_i given t_{0:i-1}
+        # Head 1 predicts t_{i+1} given t_{0:i-1}, etc.
+        shifted_targets = []
+        for k in range(self.config.num_targets):
+            if k == 0:
+                target = targets.contiguous()
+            else:
+                target = targets[:, k:].contiguous()
+                logits[k] = logits[k][:, :-k, :].contiguous()
+            shifted_targets.append(target)
+
+        # Compute losses for each head
+        losses = []
+        for k in range(self.config.num_targets):
+            loss = F.cross_entropy(
+                logits[k].view(-1, logits[k].size(-1)),
+                shifted_targets[k].view(-1),
+                ignore_index=-1
+            )
+            # Apply weighting: primary loss has weight 1.0, auxiliary losses have weight 0.5
+            weight = (0.5) ** k
+            losses.append(weight * loss)
+        return losses
 
     def forward(self, idx, targets=None, eval_only=False, current_iter=None):
         device = idx.device
@@ -345,63 +399,12 @@ class GPT(nn.Module):
 
             # Compute auxiliary predictions from the current layer
             if self.config.intermediate_loss and targets is not None and not eval_only:
-                # Calculate the dropout step for this layer
-                dropout_step = (layer_idx + 1) / (2 * self.config.n_layer) * self.config.max_iters
-
-                intermediate_losses = []
-                if current_iter is not None and current_iter < dropout_step:
-                    for k in range(self.config.num_targets):
-                        if k == 0:
-                            shifted_target = targets.contiguous()
-                            aux_logits = self.aux_lm_heads[layer_idx][k](x).contiguous()
-                        else:
-                            # Shift targets for each additional target
-                            shifted_target = targets[:, k:].contiguous()
-                            # Adjust logits to align with shifted targets
-                            aux_logits = self.aux_lm_heads[layer_idx][k](x)[:, :-k, :].contiguous()
-                        # Compute cross-entropy loss
-                        aux_loss = F.cross_entropy(
-                            aux_logits.view(-1, aux_logits.size(-1)),
-                            shifted_target.view(-1),
-                            ignore_index=-1
-                        )
-                        # Weight intermediate losses less than the main loss
-                        weight = (0.5) ** k
-                        intermediate_losses.append(weight * aux_loss)
-                total_loss += sum(intermediate_losses)
+                total_loss += self._intermediate_loss(x, targets, layer_idx, current_iter)
 
         x = self.transformer.ln_f(x)
 
         if targets is not None and not eval_only:
-            # Generate logits for all targets
-            logits = [head(x) for head in self.lm_heads]  # List of tensors: [ (b, t, vocab), ... ]
-
-            # Prepare shifted targets for each head
-            # Head 0 predicts t_i given t_{0:i-1}
-            # Head 1 predicts t_{i+1} given t_{0:i-1}, etc.
-            shifted_targets = []
-            for k in range(self.config.num_targets):
-                if k == 0:
-                    target = targets.contiguous()
-                else:
-                    target = targets[:, k:].contiguous()
-                    logits[k] = logits[k][:, :-k, :].contiguous()
-                shifted_targets.append(target)
-
-            # Compute losses for each head
-            losses = []
-            for k in range(self.config.num_targets):
-                loss = F.cross_entropy(
-                    logits[k].view(-1, logits[k].size(-1)),
-                    shifted_targets[k].view(-1),
-                    ignore_index=-1
-                )
-                # Apply weighting: primary loss has weight 1.0, auxiliary losses have weight 0.5
-                weight = (0.5) ** k
-                losses.append(weight * loss)
-
-            # Sum all losses
-            total_loss += sum(losses)
+            total_loss += self._output_loss(x, targets)
         elif targets is not None and eval_only:
             logits = self.lm_heads[0](x)
             total_loss += F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
