@@ -67,6 +67,99 @@ class RMSNorm(nn.Module):
             return self.scale * x / (norm + self.eps) + self.bias
         else:
             return self.scale * x / (norm + self.eps)
+        
+class AdaptiveSpan(nn.Module):
+    """
+    Implements the adaptive span mechanism from "Adaptive Attention Span in Transformers"
+    """
+    def __init__(self, 
+                 max_span: int,
+                 n_heads: int,
+                 adapt_span_loss_coeff: float = 0.000002,
+                 ramp_size: int = 32):
+        """
+        Parameters:
+        -----------
+        max_span: int
+            Maximum attention span possible (S in paper)
+        n_heads: int
+            Number of attention heads
+        adapt_span_loss_coeff: float
+            Coefficient for the adaptive span loss (lambda in paper)
+        ramp_size: int
+            Size of the ramp for the masking function (R in paper)
+        """
+        super().__init__()
+        
+        self.max_span = max_span
+        self.n_heads = n_heads
+        self.adapt_span_loss_coeff = adapt_span_loss_coeff
+        self.ramp_size = ramp_size
+        
+        # Initialize learnable spans for each head
+        # z = Sz' where z' ∈ [0, 1] as per paper
+        self.span_params = nn.Parameter(torch.zeros(n_heads))
+        
+        # Ensure spans start in [0, 1] range
+        with torch.no_grad():
+            self.span_params.data.clamp_(0, 1)
+            
+    def get_current_spans(self):
+        """Returns current attention spans for all heads"""
+        return self.max_span * self.span_params.clamp(0, 1)
+    
+    def get_loss(self):
+        return self.adapt_span_loss_coeff * torch.sum(self.get_current_spans()) / self.n_heads
+            
+    def forward(self, attn):
+        """
+        Compute adaptive span mask and loss
+        
+        Parameters:
+        -----------
+        attn: torch.Tensor of shape (batch_size, n_heads, seq_len, seq_len)
+            
+        Returns:
+        --------
+        adaptive_mask: torch.Tensor of shape (batch_size, n_heads, seq_len, seq_len)
+            Modified attention mask with learnable spans
+        loss: torch.Tensor (scalar)
+            L1 loss term for span sizes
+        """
+        seq_len = attn.size(-1)
+        device = attn.device
+        
+        # Get current spans for each head
+        current_spans = self.get_current_spans()  # shape: (n_heads,)
+        
+        # Create distance matrix
+        positions = torch.arange(seq_len, device=device)
+        # For each position i, calculate distance to previous positions j as (i - j)
+        # This gives us how far back we're looking from the current position
+        distances = positions.view(-1, 1) - positions.view(1, -1)  # shape: (seq_len, seq_len)
+        distances = distances.abs()  # make distances positive
+        distances = distances.tril()
+
+        # Expand dimensions for broadcasting
+        distances = distances.view(1, 1, seq_len, seq_len)
+        current_spans = current_spans.view(-1, 1, 1)  # shape: (n_heads, 1, 1)
+
+        # Mask based on distance
+        for head_idx in range(self.n_heads):
+            span = current_spans[head_idx]
+            
+            # Create soft masking for this head
+            # mz(x) = min(max((R + z - x)/R, 0), 1)
+            soft_mask = (self.ramp_size + span - distances) / self.ramp_size
+            soft_mask = torch.clamp(soft_mask, 0, 1)
+            
+            # Apply this head's mask to the corresponding attention mask
+            attn[:, head_idx] = attn[:, head_idx] * soft_mask
+        
+        attn = attn / (attn.sum(-1, keepdim=True) + 1e-8)
+        
+        return attn
+    
 
 class CausalSelfAttention(nn.Module):
 
@@ -84,8 +177,9 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.dropout = config.dropout
         self.rope = config.rope
+        self.adaptive_span = config.adaptive_span
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
-        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention') if not self.adaptive_span else False
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
@@ -94,6 +188,13 @@ class CausalSelfAttention(nn.Module):
         if self.rope:
             self.rotary_emb = RoPE(config.n_embd//config.n_head)
 
+        if self.adaptive_span:
+            self.adaptive_span = AdaptiveSpan(
+                max_span=config.block_size, 
+                n_heads=config.n_head,
+                adapt_span_loss_coeff=config.adapt_span_loss_coeff,
+                ramp_size=config.ramp_size
+            )
 
     def forward(self, x, pos=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -116,6 +217,9 @@ class CausalSelfAttention(nn.Module):
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
             att = F.softmax(att, dim=-1)
+            if self.adaptive_span:
+                att = self.adaptive_span(att)
+
             att = self.attn_dropout(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
@@ -234,6 +338,9 @@ class GPTConfig:
     intermediate_loss: bool = False
     max_iters: int = 600000
     weight_tying: bool = True
+    adaptive_span: bool = False
+    adapt_span_loss_coeff: float = 0.000002
+    ramp_size: int = 32
 
 class GPT(nn.Module):
 
@@ -371,7 +478,7 @@ class GPT(nn.Module):
             # Apply weighting: primary loss has weight 1.0, auxiliary losses have weight 0.5
             weight = (0.5) ** k
             losses.append(weight * loss)
-        return losses
+        return logits, sum(losses)
 
     def forward(self, idx, targets=None, eval_only=False, current_iter=None):
         device = idx.device
@@ -406,7 +513,8 @@ class GPT(nn.Module):
         x = self.transformer.ln_f(x)
 
         if targets is not None and not eval_only:
-            total_loss += self._output_loss(x, targets)
+            logits, loss = self._output_loss(x, targets)
+            total_loss += loss
         elif targets is not None and eval_only:
             logits = self.lm_heads[0](x)
             total_loss += F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
@@ -414,6 +522,12 @@ class GPT(nn.Module):
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_heads[0](x[:, [-1], :]) # note: using list [-1] to preserve the time dim; (b, 1, vocab)
             total_loss = None
+        
+        if self.config.adaptive_span and not eval_only:
+            # go through all CausalSelfAttention blocks and sum up the span loss
+            for block in self.transformer.h:
+                if hasattr(block.attn, 'adaptive_span'):
+                    total_loss += block.attn.adaptive_span.get_loss()
 
         return logits, total_loss
 

@@ -28,6 +28,7 @@ mlp = 'gpt'
 activation = 'relu'
 pos_emb = 'learned_per_layer'
 rope = False
+bias = True
 
 num_targets = 2
 intermediate_loss = True

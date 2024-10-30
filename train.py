@@ -63,6 +63,9 @@ num_targets = 1
 intermediate_loss = False
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
+adaptive_span = False
+adapt_span_loss_coeff = 0.0
+ramp_size = 0
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
 max_iters = 600000 # total number of training iterations
@@ -182,7 +185,8 @@ if os.path.exists(meta_path):
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout, norm_type=norm_type, 
                   mlp=mlp, activation=activation, pos_emb=pos_emb, rope=rope, num_targets=num_targets,
-                  intermediate_loss=intermediate_loss, max_iters=max_iters) # start with model_args from command line
+                  intermediate_loss=intermediate_loss, max_iters=max_iters, adaptive_span=adaptive_span,
+                  adapt_span_loss_coeff=adapt_span_loss_coeff, ramp_size=ramp_size) # start with model_args from command line
 print(model_args)
 if init_from == 'scratch':
     # init a new model from scratch
@@ -372,63 +376,6 @@ while True:
     # termination conditions
     if iter_num > max_iters:
         break
-
-model.eval()
-
-# Evaluate on the entire validation set
-val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint8, mode='r')
-
-# Calculate the Number of Batches
-num_batches = len(val_data) // (batch_size * block_size)
-
-# Initialize a List to Store Losses
-losses = []
-
-# Iterate Over Each Batch
-for batch_num in range(num_batches):
-    # Calculate Starting Indices for the Current Batch
-    # Each batch contains 'batch_size' sequences, each starting 'block_size' apart
-    # Example for batch_num=0: [0, 512, 1024, ..., (batch_size-1)*512]
-    # Example for batch_num=1: [batch_size*512, (batch_size+1)*512, ...]
-    start_base = batch_num * batch_size * block_size
-    ix = [start_base + j * block_size for j in range(batch_size)]
-    
-    # Extract Input (`x`) and Target (`y`) Sequences
-    # Ensure that indices do not exceed the data length
-    # This is already handled by 'num_batches'
-    x = torch.stack([
-        torch.from_numpy(val_data[start:start + block_size].astype(np.int64))
-        for start in ix
-    ])
-    
-    y = torch.stack([
-        torch.from_numpy(val_data[start + 1:start + 1 + block_size].astype(np.int64))
-        for start in ix
-    ])
-    
-    # Move Tensors to the Specified Device
-    if device_type == 'cuda':
-        x = x.pin_memory().to(device, non_blocking=True)
-        y = y.pin_memory().to(device, non_blocking=True)
-    else:
-        x = x.to(device)
-        y = y.to(device)
-
-    logits, _ = model(x)
-
-    loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y[:, -1].view(-1), ignore_index=-1)
-    loss = loss / math.log(2)
-
-    # Should I average the loss over the batch size? No, because the reduction argument is already set to mean.
-    losses.append(loss.item())
-
-total_loss = sum(losses) / len(losses) # Should be ok to average this way since most of the time the batch size is the same.
-
-print(f"Validation loss: {total_loss:.4f}")
-if wandb_log:
-    wandb.log({
-        "final_val": total_loss,
-    })
 
 if ddp:
     destroy_process_group()
