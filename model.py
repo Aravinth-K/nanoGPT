@@ -15,8 +15,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from adaptive_span import AdaptiveSpan
-
 def get_norm(config):
     norm_type = config.norm_type.lower()
     if norm_type == 'layernorm':
@@ -96,12 +94,6 @@ class CausalSelfAttention(nn.Module):
         if self.rope:
             self.rotary_emb = RoPE(config.n_embd//config.n_head)
 
-        if self.adaptive_span_enabled:
-            self.adaptive_span = AdaptiveSpan(
-                attn_span=config.attn_span, 
-                nb_heads=config.n_head,
-                **config.adapt_span_params
-            )
 
     def forward(self, x, pos=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
