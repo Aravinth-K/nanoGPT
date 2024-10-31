@@ -403,7 +403,7 @@ while True:
     if iter_num > max_iters:
         break
 
-test_loss = estimate_performance(model, data_dir, batch_size, block_size, device_type, wandb_log)
+test_loss = estimate_performance()
 print(f"Performance after {final_eval_iters} iterations: val loss {test_loss['val']:.4f}, test loss {test_loss['test']:.4f}")
 if wandb_log:
     wandb.log({
