@@ -24,6 +24,7 @@ mlp = 'glu'
 activation = 'silu'
 pos_emb = 'learned_per_layer'
 rope = False
+bias = True
 
 adaptive_span= False
 adapt_span_loss_coeff= 0.000002
@@ -31,10 +32,10 @@ ramp_size= 32
 
 num_targets = 2
 intermediate_loss = True
-learning_rate = 1e-3
+learning_rate = 3e-3
 max_iters = 10000
 lr_decay_iters = 10000 
-min_lr = 1e-4 # learning_rate / 10 usually
+min_lr = 3e-4 # learning_rate / 10 usually
 
 warmup_iters = 100 # not super necessary potentially
 
