@@ -25,6 +25,10 @@ activation = 'silu'
 pos_emb = 'learned_per_layer'
 rope = False
 
+adaptive_span= False
+adapt_span_loss_coeff= 0.000002
+ramp_size= 32
+
 num_targets = 2
 intermediate_loss = True
 learning_rate = 3e-3
