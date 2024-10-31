@@ -31,7 +31,6 @@ learning_rate = 3e-3
 max_iters = 10000
 lr_decay_iters = 5000 
 min_lr = 3e-4 # learning_rate / 10 usually
-beta2 = 0.99 
 
 warmup_iters = 100 # not super necessary potentially
 
