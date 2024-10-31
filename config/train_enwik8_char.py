@@ -1,7 +1,8 @@
 out_dir = 'out-ewik8-char'
-eval_interval = 250
+eval_interval = 1000
 eval_iters = 200
-log_interval = 10 
+final_eval_iters = 2000
+log_interval = 100
 
 always_save_checkpoint = False
 
@@ -15,12 +16,12 @@ batch_size = 16
 block_size = 512 
 
 n_layer = 12
-n_head = 2
+n_head = 8
 n_embd = 512
-dropout = 0.2
-norm_type = 'layernorm'
-mlp = 'gpt'
-activation = 'relu'
+dropout = 0.1
+norm_type = 'rmsnorm'
+mlp = 'glu'
+activation = 'silu'
 pos_emb = 'learned_per_layer'
 rope = False
 
@@ -28,7 +29,7 @@ num_targets = 2
 intermediate_loss = True
 learning_rate = 3e-3
 max_iters = 10000
-lr_decay_iters = 10000 
+lr_decay_iters = 5000 
 min_lr = 3e-4 # learning_rate / 10 usually
 beta2 = 0.99 
 

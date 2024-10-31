@@ -38,8 +38,9 @@ out_dir = 'out'
 eval_interval = 2000
 log_interval = 1
 eval_iters = 200
+final_eval_iters = 2000
 eval_only = False # if True, script exits right after the first eval
-always_save_checkpoint = True # if True, always save a checkpoint after each eval
+always_save_checkpoint = False # if True, always save a checkpoint after each eval
 init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
 wandb_log = False # disabled by default
@@ -130,8 +131,10 @@ def get_batch(split):
     # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
     if split == 'train':
         data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint8, mode='r')
-    else:
+    elif split == 'val':
         data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint8, mode='r')
+    elif split == 'test':
+        data = np.memmap(os.path.join(data_dir, 'test.bin'), dtype=np.uint8, mode='r')
     ix = torch.randint(len(data) - block_size, (batch_size,))
     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
@@ -291,65 +294,21 @@ if wandb_log and master_process:
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 @torch.no_grad()
-def evaluate_model(model, data_dir, batch_size, block_size, device_type, wandb_log):
+def estimate_performance():
+    out = {}
     model.eval()
-
-    # Evaluate on the entire validation set
-    val_data = np.memmap(os.path.join(data_dir, 'test.bin'), dtype=np.uint8, mode='r')
-
-    # Calculate the Number of Batches
-    num_batches = len(val_data) // (batch_size)
-
-    # Initialize a List to Store Losses
-    losses = []
-
-    # Iterate Over Each Batch
-    for batch_num in range(num_batches):
-        # Calculate Starting Indices for the Current Batch
-        # Each batch contains 'batch_size' sequences, each starting 'block_size' apart
-        # Example for batch_num=0: [0, 512, 1024, ..., (batch_size-1)*512]
-        # Example for batch_num=1: [batch_size*512, (batch_size+1)*512, ...]
-        start_base = batch_num * batch_size 
-        ix = [start_base + j for j in range(batch_size)]
-        
-        # Extract Input (`x`) and Target (`y`) Sequences
-        # Ensure that indices do not exceed the data length
-        # This is already handled by 'num_batches'
-        x = torch.stack([
-            torch.from_numpy(val_data[start:start + block_size].astype(np.int64))
-            for start in ix
-        ])
-        
-        y = torch.stack([
-            torch.from_numpy(val_data[start + 1:start + 1 + block_size].astype(np.int64))
-            for start in ix
-        ])
-        
-        # Move Tensors to the Specified Device
-        if device_type == 'cuda':
-            x = x.pin_memory().to(device, non_blocking=True)
-            y = y.pin_memory().to(device, non_blocking=True)
-        else:
-            x = x.to(device)
-            y = y.to(device)
-
-        logits, _ = model(x, eval_only=True)
-
-        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y[:, -1].view(-1), ignore_index=-1)
-        loss = loss / math.log(2)
-
-        # Should I average the loss over the batch size? No, because the reduction argument is already set to mean.
-        losses.append(loss.item())
-
-    total_loss = sum(losses) / len(losses) # Should be ok to average this way since most of the time the batch size is the same.
-
-    print(f"Validation loss: {total_loss:.4f}")
-    if wandb_log:
-        wandb.log({
-            "test_loss": total_loss,
-        })
-
-    return total_loss
+    for split in ['val', 'test']:
+        losses = torch.zeros(final_eval_iters)
+        for k in range(final_eval_iters):
+            X, Y = get_batch(split)
+            with ctx:
+                logits, _ = model(X, eval_only=True)
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), Y[:, -1].view(-1), ignore_index=-1)
+                loss = loss / math.log(2)
+            losses[k] = loss.item()
+        out[split] = losses.mean()
+    model.train()
+    return out
 
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
@@ -444,8 +403,14 @@ while True:
     if iter_num > max_iters:
         break
 
-test_loss = evaluate_model(model, data_dir, batch_size, block_size, device_type, wandb_log)
-print(f"Test loss: {test_loss:.4f}")
+test_loss = estimate_performance(model, data_dir, batch_size, block_size, device_type, wandb_log)
+print(f"Performance after {final_eval_iters} iterations: val loss {test_loss['val']:.4f}, test loss {test_loss['test']:.4f}")
+if wandb_log:
+    wandb.log({
+        "final_eval_iter": final_eval_iters,
+        "val/bpc": test_loss['val'],
+        "test/bpc": test_loss['test'],
+    })
 
 if ddp:
     destroy_process_group()
