@@ -103,6 +103,10 @@ class AdaptiveSpan(nn.Module):
         # Ensure spans start in [0, 1] range
         with torch.no_grad():
             self.span_params.data.clamp_(0, 1)
+
+    def clamp_params(self):
+        with torch.no_grad():
+            self.span_params.data.clamp_(0, 1)
             
     def get_current_spans(self):
         """Returns current attention spans for all heads"""

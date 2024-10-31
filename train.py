@@ -416,6 +416,12 @@ while True:
     # step the optimizer and scaler if training in fp16
     scaler.step(optimizer)
     scaler.update()
+
+    if adaptive_span:
+        # make sure span parameters are in a correct range
+        for block in model.transformer.h:
+            block.attn.adaptive_span.clamp_params()
+
     # flush the gradients as soon as we can, no need for this memory anymore
     optimizer.zero_grad(set_to_none=True)
 
