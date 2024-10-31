@@ -249,13 +249,12 @@ class MLP(nn.Module):
         x = self.dropout(x)
         return x
     
-class FeedForward(nn.Module):
+class GLU(nn.Module):
     
     def __init__(self, config):
         super().__init__()
         hidden_dim = 4 * int(2 * config.n_embd / 3)
         hidden_dim = 256 * ((hidden_dim + 255) // 256)
-        print(f"FeedForward hidden_dim: {hidden_dim}")
         self.w1 = nn.Linear(config.n_embd, hidden_dim, bias=config.bias)
         self.w2 = nn.Linear(hidden_dim, config.n_embd, bias=config.bias)
         self.w3 = nn.Linear(config.n_embd, hidden_dim, bias=config.bias)
@@ -274,8 +273,8 @@ class Block(nn.Module):
         self.ln_2 = get_norm(config)
         if config.mlp == "gpt":
             self.mlp = MLP(config)
-        elif config.mlp == "llama":
-            self.mlp = FeedForward(config)
+        elif config.mlp == "glu":
+            self.mlp = GLU(config)
         else:
             raise ValueError(f"Unsupported MLP type: {config.mlp}")
 
