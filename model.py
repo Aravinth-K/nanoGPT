@@ -135,31 +135,26 @@ class AdaptiveSpan(nn.Module):
         
         # Get current spans for each head
         current_spans = self.get_current_spans()  # shape: (n_heads,)
-        
+
         # Create distance matrix
         positions = torch.arange(seq_len, device=device)
         # For each position i, calculate distance to previous positions j as (i - j)
         # This gives us how far back we're looking from the current position
         distances = positions.view(-1, 1) - positions.view(1, -1)  # shape: (seq_len, seq_len)
         distances = distances.abs()  # make distances positive
-        distances = distances.tril()
 
         # Expand dimensions for broadcasting
-        distances = distances.view(1, 1, seq_len, seq_len)
-        current_spans = current_spans.view(-1, 1, 1)  # shape: (n_heads, 1, 1)
-
-        # Mask based on distance
-        for head_idx in range(self.n_heads):
-            span = current_spans[head_idx]
-            
-            # Create soft masking for this head
-            # mz(x) = min(max((R + z - x)/R, 0), 1)
-            soft_mask = (self.ramp_size + span - distances) / self.ramp_size
-            soft_mask = torch.clamp(soft_mask, 0, 1)
-            
-            # Apply this head's mask to the corresponding attention mask
-            attn[:, head_idx] = attn[:, head_idx] * soft_mask
+        distances = distances.view(1, 1, seq_len, seq_len)  # shape: (1, 1, seq_len, seq_len)
+        current_spans = current_spans.view(-1, 1, 1)      # shape: (n_heads, 1, 1)
         
+        # Compute soft_mask for all heads simultaneously
+        # soft_mask = min(max((R + z - x)/R, 0), 1)
+        # where R is ramp_size, z is current span, x is distance
+        soft_mask = (self.ramp_size + current_spans - distances) / self.ramp_size  # shape: (n_heads, 1, seq_len, seq_len)
+        soft_mask = torch.clamp(soft_mask, 0, 1)  # ensure mask is within [0, 1]
+
+        # Apply the soft_mask without in-place operation
+        attn = attn * soft_mask  # element-wise multiplication
         attn = attn / (attn.sum(-1, keepdim=True) + 1e-8)
         
         return attn

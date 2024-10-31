@@ -26,7 +26,7 @@ pos_emb = 'learned_per_layer'
 rope = False
 bias = True
 
-adaptive_span= False
+adaptive_span= True
 adapt_span_loss_coeff= 0.000002
 ramp_size= 32
 

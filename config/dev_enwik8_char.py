@@ -38,6 +38,10 @@ lr_decay_iters = 1000 # make equal to max_iters usually
 min_lr = 3e-4 # learning_rate / 10 usually
 beta2 = 0.99 # make a bit bigger because number of tokens per iter is small
 
+adaptive_span = True
+adapt_span_loss_coeff = 0.000002
+ramp_size = 32
+
 warmup_iters = 100 # not super necessary potentially
 
 # on macbook also add
