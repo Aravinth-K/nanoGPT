@@ -26,9 +26,9 @@ dropout = 0.2
 norm_type = 'layernorm'
 mlp = 'gpt'
 activation = 'relu'
-pos_emb = 'learned_per_layer'
-rope = False
-bias = True
+pos_emb = 'absolute'
+rope = True
+bias = False
 residual_attention = False
 residual_attention_mode = 'add'
 pre_ln = True
@@ -43,7 +43,7 @@ lr_decay_iters = 1000 # make equal to max_iters usually
 min_lr = 3e-4 # learning_rate / 10 usually
 beta2 = 0.99 # make a bit bigger because number of tokens per iter is small
 
-adaptive_span = True
+adaptive_span = False
 adapt_span_loss_coeff = 0.000002
 ramp_size = 32
 

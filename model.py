@@ -183,7 +183,7 @@ class CausalSelfAttention(nn.Module):
         self.sparse_topk = config.sparse_topk
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
-        if self.adaptive_span or self.residual_attention:
+        if self.adaptive_span or self.residual_attn:
             self.flash = False
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
@@ -191,7 +191,7 @@ class CausalSelfAttention(nn.Module):
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
         if self.rope:
-            self.rotary_emb = RoPE(config.n_embd//config.n_head)
+            self.rotary_emb = RoPE(dim=config.n_embd // config.n_head)
 
         if self.adaptive_span:
             self.adaptive_span = AdaptiveSpan(
@@ -216,7 +216,7 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
         if self.rope and pos is not None:
-            q, k = self.rotary_emb.apply_rotary_pos_emb(q, k, pos)
+            q, k = self.rotary_emb(q, k)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -348,22 +348,30 @@ class RoPE(nn.Module):
     def __init__(self, dim):
         super().__init__()
         inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
-        inv_freq = inv_freq.repeat_interleave(2)
         self.register_buffer('inv_freq', inv_freq)
 
-    def apply_rotary_pos_emb(self, q, k, pos):
-        sinusoid_inp = torch.einsum("i , j -> i j", pos, self.inv_freq)
-        sin = sinusoid_inp.sin()
-        cos = sinusoid_inp.cos()
-        q_rot = (q * cos) + (self.rotate_half(q) * sin)
-        k_rot = (k * cos) + (self.rotate_half(k) * sin)
-        return q_rot, k_rot
+    def forward(self, q, k):
+        t = q.size(-2)
+        freqs = torch.einsum("i,j->ij", torch.arange(t, device=q.device).float(), self.inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        cos = emb.cos()[None, None, :, :]
+        sin = emb.sin()[None, None, :, :]
+        q = self.apply_rotary_pos_emb(q, cos, sin)
+        k = self.apply_rotary_pos_emb(k, cos, sin)  # Fix the call for 'k'
+        return q, k
+    
+    def apply_rotary_pos_emb(self, q, cos, sin):
+        # Apply rotary position embedding to query and key
+        q_cos = q * cos
+        q_sin = q * sin
+        q_rotated = q_cos + self.rotate_half(q_sin)
+        return q_rotated
 
-    @staticmethod
-    def rotate_half(x):
-        x = x.view(*x.shape[:-1], -1, 2)
-        x = torch.stack([-x[..., 1], x[..., 0]], dim=-1)
-        return x.flatten(-2)
+    def rotate_half(self, x):
+        # Helper function to apply rotation
+        x1 = x[..., :x.shape[-1]//2]
+        x2 = x[..., x.shape[-1]//2:]
+        return torch.cat((-x2, x1), dim=-1)
     
 class PositionalEmbedding(nn.Module):
     def __init__(self, n_embd, max_seq_len=512):
@@ -372,17 +380,17 @@ class PositionalEmbedding(nn.Module):
         self.n_embd = n_embd
         self.max_seq_len = max_seq_len
 
-        inv_freq = 1 / (10000 ** (torch.arange(0.0, n_embd, 2.0) / n_embd))
-        self.register_buffer('inv_freq', inv_freq)
+        # Create a long enough P matrix once.
+        pe = torch.zeros(max_seq_len, n_embd)
+        position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, n_embd, 2).float() * (-math.log(10000.0) / n_embd))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)  # Shape: (1, max_seq_len, embed_dim)
+        self.register_buffer('pe', pe)
 
-    def forward(self, pos_seq):
-        # pos_seq: [t]
-        # Ensure pos_seq is float for torch.outer
-        pos_seq = pos_seq.float()
-        sinusoid_inp = torch.outer(pos_seq, self.inv_freq)  # [t, n_embd/2]
-        pos_emb = torch.cat([sinusoid_inp.sin(), sinusoid_inp.cos()], dim=-1)  # [t, n_embd]
-        pos_emb = pos_emb.unsqueeze(0)  # [1, t, n_embd]
-        return pos_emb
+    def forward(self, seq_len):
+        return self.pe[:, :seq_len, :]
 
 @dataclass
 class GPTConfig:
@@ -488,7 +496,7 @@ class GPT(nn.Module):
             if self.config.pos_emb == 'learned_per_layer':
                 for i in range(self.config.n_layer):
                     n_params -= self.transformer.wpe[i].weight.numel()
-            else:
+            elif self.config.pos_emb == 'learned':
                 n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
@@ -572,10 +580,15 @@ class GPT(nn.Module):
             tok_emb = torch.cat([mem_emb, tok_emb], dim=1)  # (b, m + t, n_embd)
 
         # Positional embeddings
-        if self.config.pos_emb == 'learned':
+        if self.config.pos_emb == 'absolute':
+            pos_emb = self.transformer.wpe(t)  # (t, n_embd)
+            x = self.transformer.drop(tok_emb + pos_emb)
+        elif self.config.pos_emb == 'learned':
             pos_emb = self.transformer.wpe(pos)  # (t, n_embd)
             x = self.transformer.drop(tok_emb + pos_emb)
         elif self.config.pos_emb == 'learned_per_layer':
+            x = self.transformer.drop(tok_emb)
+        elif self.config.pos_emb is None:
             x = self.transformer.drop(tok_emb)
         else:
             raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
