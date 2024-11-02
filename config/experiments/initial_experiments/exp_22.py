@@ -1,4 +1,4 @@
-# swiglu
+# swiglu - did slightly worse 
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
