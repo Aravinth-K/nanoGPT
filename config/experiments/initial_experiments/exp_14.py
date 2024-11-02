@@ -1,4 +1,4 @@
-# no bias
+# rope with per layer pos emb - slightly better than rope alone. Function of more capacity?
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_4'
+wandb_run_name = 'initial_0'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -24,9 +24,9 @@ norm_type = 'layernorm'
 pre_ln = True
 mlp = 'gpt'
 activation = 'relu'
-pos_emb = 'learned'
-rope = False
-bias = False
+pos_emb = 'learned_per_layer'
+rope = True
+bias = True
 weight_tying = True
 
 num_targets = 1

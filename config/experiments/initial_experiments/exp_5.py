@@ -1,4 +1,4 @@
-# 32 batch size
+# no weight tying
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,11 +9,11 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_8'
+wandb_run_name = 'initial_5'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
-batch_size = 32
+batch_size = 16
 block_size = 512 
 
 n_layer = 12
@@ -24,10 +24,10 @@ norm_type = 'layernorm'
 pre_ln = True
 mlp = 'gpt'
 activation = 'relu'
-pos_emb = 'learned'
-rope = False
+pos_emb = 'none'
+rope = True
 bias = True
-weight_tying = True
+weight_tying = False
 
 num_targets = 1
 intermediate_loss = False

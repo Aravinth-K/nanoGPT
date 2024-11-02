@@ -1,4 +1,4 @@
-# 0.1 dropout
+# glu mlp - much worse than gpt mlp
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_15'
+wandb_run_name = 'initial_9'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -19,13 +19,13 @@ block_size = 512
 n_layer = 12
 n_head = 8
 n_embd = 512
-dropout = 0.1
+dropout = 0.2
 norm_type = 'layernorm'
 pre_ln = True
-mlp = 'gpt'
+mlp = 'glu'
 activation = 'relu'
-pos_emb = 'learned'
-rope = False
+pos_emb = 'none'
+rope = True
 bias = True
 weight_tying = True
 

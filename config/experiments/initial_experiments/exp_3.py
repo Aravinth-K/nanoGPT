@@ -1,4 +1,4 @@
-# gelu activation
+# rmsnorm - beats layernorm
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_10'
+wandb_run_name = 'initial_3'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -20,12 +20,12 @@ n_layer = 12
 n_head = 8
 n_embd = 512
 dropout = 0.2
-norm_type = 'layernorm'
+norm_type = 'rmsnorm'
 pre_ln = True
 mlp = 'gpt'
-activation = 'gelu'
-pos_emb = 'learned'
-rope = False
+activation = 'relu'
+pos_emb = 'none'
+rope = True
 bias = True
 weight_tying = True
 

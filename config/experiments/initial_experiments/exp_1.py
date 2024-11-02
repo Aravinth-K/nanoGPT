@@ -1,4 +1,4 @@
-# intermediate loss
+# rope embeddings
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_20'
+wandb_run_name = 'initial_1'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -24,13 +24,13 @@ norm_type = 'layernorm'
 pre_ln = True
 mlp = 'gpt'
 activation = 'relu'
-pos_emb = 'learned'
-rope = False
+pos_emb = 'none'
+rope = True
 bias = True
 weight_tying = True
 
 num_targets = 1
-intermediate_loss = True
+intermediate_loss = False
 
 adaptive_span= False
 adapt_span_loss_coeff= 0.000002

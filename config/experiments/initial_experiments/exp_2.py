@@ -1,4 +1,4 @@
-# rope 
+# 4 heads - significantly worse performance than 8 heads
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_0'
+wandb_run_name = 'initial_2'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -17,7 +17,7 @@ batch_size = 16
 block_size = 512 
 
 n_layer = 12
-n_head = 8
+n_head = 4
 n_embd = 512
 dropout = 0.2
 norm_type = 'layernorm'

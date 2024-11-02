@@ -1,4 +1,4 @@
-# no weight tying
+# swiglu
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_5'
+wandb_run_name = 'initial_22'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -22,12 +22,12 @@ n_embd = 512
 dropout = 0.2
 norm_type = 'layernorm'
 pre_ln = True
-mlp = 'gpt'
-activation = 'relu'
-pos_emb = 'learned'
-rope = False
+mlp = 'glu'
+activation = 'silu'
+pos_emb = 'none'
+rope = True
 bias = True
-weight_tying = False
+weight_tying = True
 
 num_targets = 1
 intermediate_loss = False

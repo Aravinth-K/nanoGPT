@@ -1,4 +1,4 @@
-# 2 heads
+# 0.1 dropout - slightly worse than 0.2
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_2'
+wandb_run_name = 'initial_15'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -17,15 +17,15 @@ batch_size = 16
 block_size = 512 
 
 n_layer = 12
-n_head = 2
+n_head = 8
 n_embd = 512
-dropout = 0.2
+dropout = 0.1
 norm_type = 'layernorm'
 pre_ln = True
 mlp = 'gpt'
 activation = 'relu'
-pos_emb = 'learned'
-rope = False
+pos_emb = 'none'
+rope = True
 bias = True
 weight_tying = True
 

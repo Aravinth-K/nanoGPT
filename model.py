@@ -456,6 +456,8 @@ class GPT(nn.Module):
             self.transformer.wpe = nn.ModuleList([
                 nn.Embedding(config.block_size, config.n_embd) for _ in range(config.n_layer)
             ])
+        elif config.pos_emb == 'none':
+            pass
         else:
             raise ValueError(f"Unsupported pos_emb: {config.pos_emb}")
         

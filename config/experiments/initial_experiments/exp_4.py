@@ -1,4 +1,4 @@
-# basic config
+# no bias - slightly worse than bias
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_0'
+wandb_run_name = 'initial_4'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -24,9 +24,9 @@ norm_type = 'layernorm'
 pre_ln = True
 mlp = 'gpt'
 activation = 'relu'
-pos_emb = 'learned'
-rope = False
-bias = True
+pos_emb = 'none'
+rope = True
+bias = False
 weight_tying = True
 
 num_targets = 1

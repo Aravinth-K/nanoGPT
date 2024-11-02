@@ -1,4 +1,4 @@
-# silu activation
+# learned per layer pos emb - does this perform better than rope? No. Much worse.
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_11'
+wandb_run_name = 'initial_12'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -23,8 +23,8 @@ dropout = 0.2
 norm_type = 'layernorm'
 pre_ln = True
 mlp = 'gpt'
-activation = 'silu'
-pos_emb = 'learned'
+activation = 'relu'
+pos_emb = 'learned_per_layer'
 rope = False
 bias = True
 weight_tying = True

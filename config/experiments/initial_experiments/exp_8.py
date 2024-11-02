@@ -1,4 +1,4 @@
-# 6 layers
+# 32 batch size - very good
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,14 +9,14 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'initial_19'
+wandb_run_name = 'initial_8'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
-batch_size = 16
+batch_size = 32
 block_size = 512 
 
-n_layer = 6
+n_layer = 12
 n_head = 8
 n_embd = 512
 dropout = 0.2
@@ -24,8 +24,8 @@ norm_type = 'layernorm'
 pre_ln = True
 mlp = 'gpt'
 activation = 'relu'
-pos_emb = 'learned'
-rope = False
+pos_emb = 'none'
+rope = True
 bias = True
 weight_tying = True
 
