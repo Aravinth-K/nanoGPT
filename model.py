@@ -339,7 +339,7 @@ class GPTConfig:
     adaptive_span: bool = False
     adapt_span_loss_coeff: float = 0.000002
     ramp_size: int = 32
-
+    num_memory_tokens: int = 0
 class GPT(nn.Module):
 
     def __init__(self, config):
@@ -347,6 +347,9 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
+
+        if config.num_memory_tokens > 0:
+            self.mem_tokens = nn.Parameter(torch.randn(config.num_memory_tokens, config.n_embd))  # m memory tokens
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
@@ -486,6 +489,13 @@ class GPT(nn.Module):
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
+
+        if self.config.num_memory_tokens > 0:
+            # Memory embeddings expanded for the batch
+            mem_emb = self.mem_tokens.unsqueeze(0).expand(b, -1, -1)  # (b, m, n_embd)
+
+            # Concatenate memory tokens with input tokens
+            tok_emb = torch.cat([mem_emb, tok_emb], dim=1)  # (b, m + t, n_embd)
 
         # Positional embeddings
         if self.config.pos_emb == 'learned':
