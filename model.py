@@ -179,6 +179,7 @@ class CausalSelfAttention(nn.Module):
         self.adaptive_span = config.adaptive_span
         self.residual_attn = config.residual_attention
         self.residual_attn_mode = config.residual_attention_mode
+        self.in_gate = config.in_gate
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if self.adaptive_span or self.residual_attention:
@@ -198,6 +199,10 @@ class CausalSelfAttention(nn.Module):
                 adapt_span_loss_coeff=config.adapt_span_loss_coeff,
                 ramp_size=config.ramp_size
             )
+
+        if self.in_gate:
+            self.in_gate = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+            self.in_gate_activation = F.silu
 
     def forward(self, x, pos=None, prev_attn=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -233,6 +238,10 @@ class CausalSelfAttention(nn.Module):
             att = self.attn_dropout(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
+        if self.in_gate:
+            gate = self.in_gate_activation(self.in_gate(x))
+            y = y * gate
 
         # output projection
         y = self.resid_dropout(self.c_proj(y))
@@ -373,6 +382,7 @@ class GPTConfig:
     pre_ln: bool = True
     residual_attention: bool = False  # New flag: Enable residual attention
     residual_attention_mode: str = 'add'  # New flag: 'add' or 'mean'
+    in_gate: bool = False
 
 class GPT(nn.Module):
 
