@@ -32,7 +32,8 @@ bias = True
 residual_attention = False
 residual_attention_mode = 'add'
 pre_ln = True
-in_gate = True
+in_gate = False
+sparse_topk = 8
 
 num_targets = 2
 intermediate_loss = True

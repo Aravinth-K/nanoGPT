@@ -180,6 +180,7 @@ class CausalSelfAttention(nn.Module):
         self.residual_attn = config.residual_attention
         self.residual_attn_mode = config.residual_attention_mode
         self.in_gate = config.in_gate
+        self.sparse_topk = config.sparse_topk
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if self.adaptive_span or self.residual_attention:
@@ -204,6 +205,7 @@ class CausalSelfAttention(nn.Module):
             self.in_gate = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
             self.in_gate_activation = F.silu
 
+
     def forward(self, x, pos=None, prev_attn=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
@@ -222,21 +224,7 @@ class CausalSelfAttention(nn.Module):
             y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
         else:
             # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            if prev_attn is not None and self.residual_attn:
-                if self.residual_attn_mode == 'add':
-                    att = att + prev_attn
-                elif self.residual_attn_mode == 'mean':
-                    att = (att + prev_attn) / 2
-                else:
-                    raise ValueError(f"Unsupported residual_attention_mode: {self.residual_attn_mode}")
-                prev_attn = att
-            att = F.softmax(att, dim=-1)
-            if self.adaptive_span:
-                att = self.adaptive_span(att)
-            att = self.attn_dropout(att)
-            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+            y = self._manual_attention(q, k, v, T, prev_attn)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         if self.in_gate:
@@ -246,6 +234,45 @@ class CausalSelfAttention(nn.Module):
         # output projection
         y = self.resid_dropout(self.c_proj(y))
         return y, prev_attn
+    
+    def sparse_topk_attn(self, attn, sparse_topk):
+        orig_attn = attn
+        mask_value = -torch.finfo(attn.dtype).max
+        top_values, _ = attn.topk(sparse_topk, dim = -1)
+        sparse_topk_mask = (attn >= top_values[..., -1:]) & (attn > mask_value)
+        attn = attn.masked_fill(~sparse_topk_mask, mask_value)
+        topk_attn = attn.softmax(dim = -1)
+        soft_attn = orig_attn.softmax(dim = -1)
+        return topk_attn.detach() + soft_attn - soft_attn.detach()
+    
+    def _manual_attention(self, q, k, v, T, prev_attn=None):
+        # manual implementation of attention
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        if prev_attn is not None and self.residual_attn:
+            if self.residual_attn_mode == 'add':
+                att = att + prev_attn
+            elif self.residual_attn_mode == 'mean':
+                att = (att + prev_attn) / 2
+            else:
+                raise ValueError(f"Unsupported residual_attention_mode: {self.residual_attn_mode}")
+            prev_attn = att
+        if self.sparse_topk > 0:
+            # Apply sparse top-k attention
+            att = self.sparse_topk_attn(
+                attn=att,
+                sparse_topk=self.sparse_topk,
+            )
+        else:
+            # Apply standard softmax attention
+            att = F.softmax(att, dim=-1)
+            
+        if self.adaptive_span:
+            att = self.adaptive_span(att)
+        att = self.attn_dropout(att)
+        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        return y
+
 
 class MLP(nn.Module):
 
@@ -383,6 +410,7 @@ class GPTConfig:
     residual_attention: bool = False  # New flag: Enable residual attention
     residual_attention_mode: str = 'add'  # New flag: 'add' or 'mean'
     in_gate: bool = False
+    sparse_topk: int = 0
 
 class GPT(nn.Module):
 
