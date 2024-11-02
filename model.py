@@ -274,8 +274,26 @@ class Block(nn.Module):
             raise ValueError(f"Unsupported MLP type: {config.mlp}")
 
     def forward(self, x, pos=None):
-        x = x + self.attn(self.ln_1(x), pos)
-        x = x + self.mlp(self.ln_2(x))
+        if self.config.pre_ln:
+            # Pre-LN: Apply LayerNorm before sub-layers
+            norm_x = self.ln_1(x)
+            att_output = self.attn(norm_x, pos)
+            x = x + att_output
+
+            # MLP Sub-layer
+            norm_x = self.ln_2(x)
+            mlp_output = self.mlp(norm_x)
+            x = x + mlp_output
+        else:
+            # Post-LN: Apply LayerNorm after sub-layers
+            att_output = self.attn(x, pos)
+            x = x + att_output
+            x = self.ln_1(x)
+
+            # MLP Sub-layer
+            mlp_output = self.mlp(x)
+            x = x + mlp_output
+            x = self.ln_2(x)
         return x
     
 class RoPE(nn.Module):
@@ -340,6 +358,8 @@ class GPTConfig:
     adapt_span_loss_coeff: float = 0.000002
     ramp_size: int = 32
     num_memory_tokens: int = 0
+    pre_ln: bool = False  # New flag: False for Post-LN, True for Pre-LN
+
 class GPT(nn.Module):
 
     def __init__(self, config):
