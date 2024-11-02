@@ -29,6 +29,9 @@ activation = 'relu'
 pos_emb = 'learned_per_layer'
 rope = False
 bias = True
+residual_attention = True
+residual_attention_mode = 'add'
+pre_ln = False
 
 num_targets = 2
 intermediate_loss = True

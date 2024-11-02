@@ -60,6 +60,8 @@ mlp = 'gpt'
 activation = 'gelu'
 pos_emb = 'learned'
 rope = False
+residual_attention = True
+residual_attention_mode = 'add'
 num_targets = 1
 intermediate_loss = False
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
@@ -68,6 +70,7 @@ adaptive_span = False
 adapt_span_loss_coeff = 0.0
 ramp_size = 0
 num_memory_tokens = 0
+pre_ln = True
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
 max_iters = 600000 # total number of training iterations
@@ -164,7 +167,8 @@ model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=bloc
                   bias=bias, vocab_size=None, dropout=dropout, norm_type=norm_type, 
                   mlp=mlp, activation=activation, pos_emb=pos_emb, rope=rope, num_targets=num_targets,
                   intermediate_loss=intermediate_loss, max_iters=max_iters, adaptive_span=adaptive_span,
-                  adapt_span_loss_coeff=adapt_span_loss_coeff, ramp_size=ramp_size, num_memory_tokens=num_memory_tokens) # start with model_args from command line
+                  adapt_span_loss_coeff=adapt_span_loss_coeff, ramp_size=ramp_size, num_memory_tokens=num_memory_tokens,
+                  pre_ln=pre_ln, residual_attention=residual_attention, residual_attention_mode=residual_attention_mode) # start with model_args from command line
 print(model_args)
 if init_from == 'scratch':
     # init a new model from scratch

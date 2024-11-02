@@ -177,8 +177,12 @@ class CausalSelfAttention(nn.Module):
         self.dropout = config.dropout
         self.rope = config.rope
         self.adaptive_span = config.adaptive_span
+        self.residual_attn = config.residual_attention
+        self.residual_attn_mode = config.residual_attention_mode
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
-        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention') if not self.adaptive_span else False
+        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        if self.adaptive_span or self.residual_attention:
+            self.flash = False
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
@@ -195,7 +199,7 @@ class CausalSelfAttention(nn.Module):
                 ramp_size=config.ramp_size
             )
 
-    def forward(self, x, pos=None):
+    def forward(self, x, pos=None, prev_attn=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -215,17 +219,24 @@ class CausalSelfAttention(nn.Module):
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
             att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+            if prev_attn is not None and self.residual_attn:
+                if self.residual_attn_mode == 'add':
+                    att = att + prev_attn
+                elif self.residual_attn_mode == 'mean':
+                    att = (att + prev_attn) / 2
+                else:
+                    raise ValueError(f"Unsupported residual_attention_mode: {self.residual_attn_mode}")
+                prev_attn = att
             att = F.softmax(att, dim=-1)
             if self.adaptive_span:
                 att = self.adaptive_span(att)
-
             att = self.attn_dropout(att)
             y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
         y = self.resid_dropout(self.c_proj(y))
-        return y
+        return y, prev_attn
 
 class MLP(nn.Module):
 
@@ -272,12 +283,13 @@ class Block(nn.Module):
             self.mlp = GLU(config)
         else:
             raise ValueError(f"Unsupported MLP type: {config.mlp}")
+        self.pre_ln = config.pre_ln
 
-    def forward(self, x, pos=None):
-        if self.config.pre_ln:
+    def forward(self, x, pos=None, prev_attn=None):
+        if self.pre_ln:
             # Pre-LN: Apply LayerNorm before sub-layers
             norm_x = self.ln_1(x)
-            att_output = self.attn(norm_x, pos)
+            att_output, _ = self.attn(norm_x, pos)
             x = x + att_output
 
             # MLP Sub-layer
@@ -286,7 +298,7 @@ class Block(nn.Module):
             x = x + mlp_output
         else:
             # Post-LN: Apply LayerNorm after sub-layers
-            att_output = self.attn(x, pos)
+            att_output, prev_attn = self.attn(x, pos, prev_attn)
             x = x + att_output
             x = self.ln_1(x)
 
@@ -294,7 +306,7 @@ class Block(nn.Module):
             mlp_output = self.mlp(x)
             x = x + mlp_output
             x = self.ln_2(x)
-        return x
+        return x, prev_attn
     
 class RoPE(nn.Module):
     def __init__(self, dim):
@@ -358,7 +370,9 @@ class GPTConfig:
     adapt_span_loss_coeff: float = 0.000002
     ramp_size: int = 32
     num_memory_tokens: int = 0
-    pre_ln: bool = False  # New flag: False for Post-LN, True for Pre-LN
+    pre_ln: bool = True
+    residual_attention: bool = False  # New flag: Enable residual attention
+    residual_attention_mode: str = 'add'  # New flag: 'add' or 'mean'
 
 class GPT(nn.Module):
 
@@ -366,6 +380,8 @@ class GPT(nn.Module):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
+        if config.residual_attention:
+            assert not config.pre_ln, "Residual attention is not compatible with Pre-LN"
         self.config = config
 
         if config.num_memory_tokens > 0:
@@ -527,12 +543,13 @@ class GPT(nn.Module):
             raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
         
         total_loss = 0
+        prev_attn = None
 
         for layer_idx, block in enumerate(self.transformer.h):
             if self.config.pos_emb == 'learned_per_layer':
                 pos_emb_layer = self.transformer.wpe[layer_idx](pos)
                 x = x + pos_emb_layer
-            x = block(x, pos if self.config.rope else None)
+            x, prev_attn = block(x, pos if self.config.rope else None, prev_attn)
 
             # Compute auxiliary predictions from the current layer
             if self.config.intermediate_loss and targets is not None and not eval_only:
