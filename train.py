@@ -60,17 +60,19 @@ mlp = 'gpt'
 activation = 'gelu'
 pos_emb = 'learned'
 rope = False
-residual_attention = True
-residual_attention_mode = 'add'
-num_targets = 1
-intermediate_loss = False
+weight_tying = True
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
+pre_ln = True
+# Modifications to the original GPT-2 config
+num_targets = 1
+intermediate_loss = False
 adaptive_span = False
 adapt_span_loss_coeff = 0.0
 ramp_size = 0
 num_memory_tokens = 0
-pre_ln = True
+residual_attention = True
+residual_attention_mode = 'add'
 in_gate = False
 sparse_topk = 0
 # adamw optimizer
@@ -165,14 +167,23 @@ if os.path.exists(meta_path):
     print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
 # model init
-model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
+# model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
+#                   bias=bias, vocab_size=None, dropout=dropout, norm_type=norm_type, 
+#                   mlp=mlp, activation=activation, pos_emb=pos_emb, rope=rope, num_targets=num_targets,
+#                   intermediate_loss=intermediate_loss, max_iters=max_iters, adaptive_span=adaptive_span,
+#                   adapt_span_loss_coeff=adapt_span_loss_coeff, ramp_size=ramp_size, num_memory_tokens=num_memory_tokens,
+#                   pre_ln=pre_ln, residual_attention=residual_attention, residual_attention_mode=residual_attention_mode,
+#                   in_gate=in_gate, sparse_topk=sparse_topk) # start with model_args from command line
+base_model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout, norm_type=norm_type, 
-                  mlp=mlp, activation=activation, pos_emb=pos_emb, rope=rope, num_targets=num_targets,
-                  intermediate_loss=intermediate_loss, max_iters=max_iters, adaptive_span=adaptive_span,
-                  adapt_span_loss_coeff=adapt_span_loss_coeff, ramp_size=ramp_size, num_memory_tokens=num_memory_tokens,
-                  pre_ln=pre_ln, residual_attention=residual_attention, residual_attention_mode=residual_attention_mode,
-                  in_gate=in_gate, sparse_topk=sparse_topk) # start with model_args from command line
-print(model_args)
+                  mlp=mlp, activation=activation, pos_emb=pos_emb, rope=rope, pre_ln=pre_ln, 
+                  weight_tying=weight_tying)
+modification_args = dict(num_targets=num_targets, intermediate_loss=intermediate_loss, max_iters=max_iters, 
+                         adaptive_span=adaptive_span, adapt_span_loss_coeff=adapt_span_loss_coeff, ramp_size=ramp_size, 
+                         num_memory_tokens=num_memory_tokens, residual_attention=residual_attention, residual_attention_mode=residual_attention_mode,
+                         in_gate=in_gate, sparse_topk=sparse_topk)
+# print(model_args)
+model_args = {**base_model_args, **modification_args}
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")

@@ -406,18 +406,25 @@ class GPTConfig:
     activation: str = 'gelu'
     pos_emb: str = 'learned'
     rope: bool = False
+    weight_tying: bool = True
+    pre_ln: bool = True
+    # Modifications to the original GPT-2 config
+    # Training
     num_targets: int = 2
     intermediate_loss: bool = False
     max_iters: int = 600000
-    weight_tying: bool = True
+    # Adaptive span
     adaptive_span: bool = False
     adapt_span_loss_coeff: float = 0.000002
     ramp_size: int = 32
+    # Memory tokens
     num_memory_tokens: int = 0
-    pre_ln: bool = True
-    residual_attention: bool = False  # New flag: Enable residual attention
-    residual_attention_mode: str = 'add'  # New flag: 'add' or 'mean'
+    # Residual attention
+    residual_attention: bool = False  
+    residual_attention_mode: str = 'add'  
+    # Gated input residual in attention
     in_gate: bool = False
+    # Sparse top-k attention
     sparse_topk: int = 0
 
 class GPT(nn.Module):
@@ -534,7 +541,7 @@ class GPT(nn.Module):
                 intermediate_losses.append(weight * aux_loss)
         return sum(intermediate_losses)
     
-    def _output_loss(self, x, targets):
+    def _multi_step_output_loss(self, x, targets):
         # Generate logits for all targets
         logits = [head(x) for head in self.lm_heads]  # List of tensors: [ (b, t, vocab), ... ]
 
@@ -562,6 +569,21 @@ class GPT(nn.Module):
             weight = (0.5) ** k
             losses.append(weight * loss)
         return logits, sum(losses)
+    
+    def _initial_pos_emb(self, tok_emb, pos):
+        if self.config.pos_emb == 'absolute':
+            pos_emb = self.transformer.wpe(pos.size(0))  # (t, n_embd)
+            x = self.transformer.drop(tok_emb + pos_emb)
+        elif self.config.pos_emb == 'learned':
+            pos_emb = self.transformer.wpe(pos)  # (t, n_embd)
+            x = self.transformer.drop(tok_emb + pos_emb)
+        elif self.config.pos_emb == 'learned_per_layer':
+            x = self.transformer.drop(tok_emb)
+        elif self.config.pos_emb is None:
+            x = self.transformer.drop(tok_emb)
+        else:
+            raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
+        return x
 
     def forward(self, idx, targets=None, eval_only=False, current_iter=None):
         device = idx.device
@@ -580,18 +602,7 @@ class GPT(nn.Module):
             tok_emb = torch.cat([mem_emb, tok_emb], dim=1)  # (b, m + t, n_embd)
 
         # Positional embeddings
-        if self.config.pos_emb == 'absolute':
-            pos_emb = self.transformer.wpe(t)  # (t, n_embd)
-            x = self.transformer.drop(tok_emb + pos_emb)
-        elif self.config.pos_emb == 'learned':
-            pos_emb = self.transformer.wpe(pos)  # (t, n_embd)
-            x = self.transformer.drop(tok_emb + pos_emb)
-        elif self.config.pos_emb == 'learned_per_layer':
-            x = self.transformer.drop(tok_emb)
-        elif self.config.pos_emb is None:
-            x = self.transformer.drop(tok_emb)
-        else:
-            raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
+        x = self._initial_pos_emb(tok_emb, pos)
         
         total_loss = 0
         prev_attn = None
@@ -609,7 +620,7 @@ class GPT(nn.Module):
         x = self.transformer.ln_f(x)
 
         if targets is not None and not eval_only:
-            logits, loss = self._output_loss(x, targets)
+            logits, loss = self._multi_step_output_loss(x, targets)
             total_loss += loss
         elif targets is not None and eval_only:
             logits = self.lm_heads[0](x)
