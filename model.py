@@ -579,7 +579,7 @@ class GPT(nn.Module):
             x = self.transformer.drop(tok_emb + pos_emb)
         elif self.config.pos_emb == 'learned_per_layer':
             x = self.transformer.drop(tok_emb)
-        elif self.config.pos_emb is None:
+        elif self.config.pos_emb is 'none':
             x = self.transformer.drop(tok_emb)
         else:
             raise ValueError(f"Unsupported pos_emb: {self.config.pos_emb}")
