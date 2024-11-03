@@ -1,4 +1,4 @@
-# baseline - found loss to diverge early on. Below is the final config.
+# baseline
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'baseline'
+wandb_run_name = 'baseline-no_mods'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -29,8 +29,8 @@ rope = True
 bias = True
 weight_tying = True
 
-num_targets = 2
-intermediate_loss = True
+num_targets = 1
+intermediate_loss = False
 
 adaptive_span= False
 adapt_span_loss_coeff= 0.000002

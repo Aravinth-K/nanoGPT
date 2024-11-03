@@ -1,4 +1,4 @@
-# baseline - found loss to diverge early on. Below is the final config.
+# residual attention, mean
 out_dir = 'out-ewik8'
 eval_interval = 1000
 eval_iters = 200
@@ -9,7 +9,7 @@ always_save_checkpoint = False
 
 wandb_log = True
 wandb_project = 'enwik8'
-wandb_run_name = 'baseline'
+wandb_run_name = 'res_attn-mean'
 
 dataset = 'enwik8'
 gradient_accumulation_steps = 1
@@ -21,7 +21,7 @@ n_head = 8
 n_embd = 512
 dropout = 0.1
 norm_type = 'rmsnorm'
-pre_ln = True
+pre_ln = False
 mlp = 'glu'
 activation = 'silu'
 pos_emb = 'none'
@@ -29,8 +29,8 @@ rope = True
 bias = True
 weight_tying = True
 
-num_targets = 2
-intermediate_loss = True
+num_targets = 1
+intermediate_loss = False
 
 adaptive_span= False
 adapt_span_loss_coeff= 0.000002
@@ -38,17 +38,17 @@ ramp_size= 32
 
 num_memory_tokens: int = 0
 
-residual_attention: bool = False  
-residual_attention_mode: str = 'add'  
+residual_attention: bool = True
+residual_attention_mode: str = 'mean'  
 
 in_gate: bool = False
 
 sparse_topk: int = 0
 
-learning_rate = 5e-4
-max_iters = 25000
-lr_decay_iters = 25000 
-min_lr = 5e-5 # learning_rate / 10 usually
+learning_rate = 1e-3
+max_iters = 10000
+lr_decay_iters = 10000 
+min_lr = 1e-3 # learning_rate / 10 usually
 
 warmup_iters = 100 # not super necessary potentially
 
